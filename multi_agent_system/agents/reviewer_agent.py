@@ -48,7 +48,7 @@ sau đó PHÁN QUYẾT CHÍNH XÁC AI LÀ NGƯỜI SAI (PLANNER, CODER, hay TEST
 ### [1. YÊU CẦU BÀI TOÁN GỐC (SPECIFICATION)]:
 {task_goal}
 
-### [2. KẾ HOẠCH KIẾN TRÚC HIỆN TẠI (PLANNER)]:
+### [2. PLAN HIỆN TẠI (PLANNER)]:
 Kiến trúc: {plan.architecture_pattern}
 Các tệp: {[f.filepath for f in plan.files]}
 
@@ -85,9 +85,9 @@ BƯỚC 2: CÂY QUYẾT ĐỊNH PHÂN ĐỊNH TRÁCH NHIỆM (CHỌN DUY NHẤT 
 1. **LỖI BIÊN DỊCH / CÚ PHÁP TẠI TỆP MÃ NGUỒN DỰ ÁN (TUYỆT ĐỐI KHÔNG CHỌN TESTER):**
    - Nếu tệp bị lỗi trong log là tệp mã nguồn của Coder/Planner (ví dụ: `services/MovieService.java:8: error: cannot find symbol`, `data/MovieRepository.java`, `Main.java`):
      -> NGUYÊN TẮC CỐT LÕI: Khi mã nguồn dự án không biên dịch được. Do đó lỗi 100% thuộc về CODER hoặc PLANNER, NGHIÊM CẤM ĐỔ LỖI CHO TESTER!
-   - Phân định giữa PLANNER và CODER:
-     + **PLANNER (GLOBAL)**: Lỗi cấu trúc/kiến trúc đa tệp - sai file path của import/include, thiếu file interface (ví dụ code ghi `implements MovieServiceInterface` nhưng kế hoạch kiến trúc không có file `MovieServiceInterface.java`), sai cấu trúc package/import giữa các thư viện/module, hoặc lệch chữ ký phương thức giữa hai tầng Service/Repository.
-     + **CODER (LOCAL)**: Lỗi cú pháp nội bộ một file, lỗi triển khai thân hàm, sai kiểu dữ liệu, hoặc Coder tự ý khởi tạo interface (`new Repository()`), gọi sai constructor của class nội bộ.
+   - Phân định giữa PLANNER và CODER (Căn cứ vào plan và code):
+     + **PLANNER (GLOBAL)**: Plan thiếu, sai, lệch class, method, interface giữa các file trong plan. 
+     + **CODER (LOCAL)**: Plan đúng, có đề cập nhưng Coder không triển khai đúng, thiếu những gì plan đề cập, sai cú pháp, sai logic thân hàm.
 
 2. LỖI BIÊN DỊCH / KHÔNG TÌM THẤY KÝ HIỆU TẠI TỆP KIỂM THỬ (TEST HARNESS):
    (Áp dụng khi log lỗi biên dịch/import chỉ ra vị trí đứt gãy xuất hiện, nằm trong file TestHarness)

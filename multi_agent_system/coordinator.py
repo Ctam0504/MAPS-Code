@@ -133,7 +133,9 @@ class MultiAgentCoordinator:
                 f.write(content)
 
         # Lưu file testcase
-        test_filename = f"test_harness.{'py' if lang == 'python' else ('java' if lang == 'java' else 'c')}"
+        test_filename = "TestHarness.java" if lang.lower() == "java" else (
+            f"test_harness.{'py' if lang.lower() == 'python' else 'c'}"
+        )
         test_full_p = os.path.join(self.output_dir, test_filename)
         with open(test_full_p, "w", encoding="utf-8") as f:
             f.write(test_harness)
