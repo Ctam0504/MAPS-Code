@@ -382,6 +382,13 @@ class MultiAgentCoordinator:
                     current_folder=self.output_dir
                 )
                 self.memory.update_plan(self.current_plan)
+                for file_spec in self.current_plan.files:
+                            print(f"      [FileSpec] {file_spec.filepath}")
+                            print(f"         action: {file_spec.action}")
+                            print(f"         dependencies: {file_spec.dependencies}")
+                            print(f"         external_dependencies: {file_spec.external_dependencies}")
+                            print(f"         purpose: {file_spec.purpose}")
+                            print(f"         interface_summary: {file_spec.interface_summary}")
                 print("   🛠️ [Điều chỉnh] Coder Agent đồng bộ lại các file mã nguồn...")
                 self.current_files = self.coder.generate_all_files(
                     plan=self.current_plan,

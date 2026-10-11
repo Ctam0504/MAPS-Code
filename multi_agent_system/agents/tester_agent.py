@@ -100,7 +100,9 @@ Nhiệm vụ: Viết bộ kịch bản kiểm thử (Test Suite) toàn diện ch
 3. Test case PHẢI khách quan và tuân thủ đúng yêu cầu bài toán. Không tự bịa ra điều kiện vô lý.
 4. Khi viết test assertion, luôn in ra giá trị thực tế nếu kiểm tra thất bại (VD: Result, Expected).
 {fmt_instruction}
-
+### [NGỮ CẢNH]:
+1. Mã kiểm thử sinh ra nằm ở thư mục gốc của dự án. Cùng cấp với filepath.
+2. Dựa vào ngữ cảnh sinh ra import/include chính xác.
 ### [YÊU CẦU ĐẦU RA]:
 CHỈ TRẢ VỀ DUY NHẤT MÃ KIỂM THỬ trong khối ```{target_language} ... ```. Không giải thích gì thêm.
 """
@@ -152,6 +154,9 @@ Testcase của bạn đã gặp **LỖI TESTCASE (TESTER FAULTY)**: Reviewer xá
 ### [NHIỆM VỤ]:
 1. Phân tích chỉ thị của Reviewer và chỉ ra chính xác các test assertion / điều kiện cần sửa.
 2. Viết lại bộ testcase hoàn chỉnh đã khắc phục toàn bộ lỗi trên.
+### [NGỮ CẢNH]:
+1. Mã kiểm thử sinh ra nằm ở thư mục gốc của dự án. Cùng cấp với filepath.
+2. Dựa vào ngữ cảnh sinh ra import/include chính xác.
 CHỈ TRẢ VỀ MÃ KIỂM THỬ trong khối ```{target_language} ... ```. Không giải thích gì thêm.
 """
 
