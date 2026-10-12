@@ -70,15 +70,26 @@ Danh sách file trách nhiệm sửa lỗi:
 
 BƯỚC 1: QUY TRÌNH XÁC ĐỊNH NGUYÊN NHÂN CỐT LÕI (ROOT CAUSE ANALYSIS):
 1. TRUY VẾT LỖI TỪ STACK TRACE / LOG:
-   - Đọc ngược từ đoạn `Caused by:` hoặc dòng lỗi sâu nhất trong [5. NHẬT KÝ LỖI SANDBOX THỰC TẾ].
-   - Trích xuất chính xác: Tên file (`filepath`), số dòng (`line_number`), tên class/method, và loại Exception / Syntax error.
+   - Xác định loại lỗi trước: lỗi khởi tạo/import, compile/syntax, exception runtime, assertion failure, hay lỗi môi trường.
+   - Với stack trace, phân biệt (a) nơi testcase gọi vào chương trình, (b) nơi exception thực sự phát sinh, và (c) các frame trung gian. Frame của test chỉ là điểm gọi, không tự động là nơi gây lỗi.
+   - Dùng frame ứng dụng sâu nhất có liên quan đến exception làm vị trí phát sinh; bỏ qua frame thư viện/runtime nếu chúng không phải nguyên nhân. Với lỗi assertion hoặc API sai trong test harness, kiểm tra chính dòng test gây lỗi.
+   - Trích xuất filepath, line number, class/method/symbol và loại lỗi chính xác. Không gọi lỗi runtime là lỗi compile.
+   - Nếu log có nhiều test lỗi, phân tích từng lỗi riêng và không gộp các lỗi khác nguyên nhân thành một kết luận.
 2. PHÂN TÍCH LUỒNG TRUY CẬP LỖI (DATAFLOW & CALL CHAIN):
-   - Nếu lỗi xảy ra tại File A (ví dụ: `NullPointerException` hoặc `cannot find symbol`):
-     + Kiểm tra xem dữ liệu/interface/class được truyền vào File A đến từ file nào (File B, File C).
-     + Nếu File A bị hỏng do nhận sai Contract / null từ File B: Root Cause nằm ở **File B**, không phải File A.
-     + Nếu File A tự tính toán sai logic nội bộ hoặc sai syntax: Root Cause nằm ở **File A**.
+   - Không kết luận root cause chỉ từ file đầu/cuối của traceback. Đối chiếu dòng lỗi với nội dung thực tế của source, test, plan và specification.
+   - Truy ngược giá trị/API gây lỗi đến nơi tạo ra hoặc định nghĩa sai. Nếu source vi phạm contract hoặc có lỗi nội bộ, root cause thuộc file nguồn đó dù testcase kích hoạt lỗi. Nếu source tuân thủ contract nhưng testcase gọi API sai hoặc đặt kỳ vọng không có căn cứ, root cause thuộc testcase.
+   - Với tên chưa định nghĩa/import thiếu, xác định file đang dùng tên đó và kiểm tra import/định nghĩa ngay tại file đó; không quy lỗi cho file chỉ vì file đó định nghĩa symbol được nhắc đến.
+   - Phân biệt bằng chứng trực tiếp với giả thuyết. Không khẳng định dataflow, contract hoặc nguyên nhân không thể chứng minh từ ngữ cảnh đã cung cấp.
 3. XÁC ĐỊNH DANH SÁCH FILE LỖI (`failed_files`):
-   - Liệt kê đầy đủ tất cả các tệp thực sự chứa nguồn gốc gây lỗi vào danh sách `failed_files` (chỉ điền tên tệp có trong dự án, không chèn ký tự thừa).
+   - Chỉ liệt kê file chứa root cause cần sửa; không liệt kê file chỉ gọi hàm, xuất hiện trong stack trace hoặc được nhắc trong phần giải thích.
+   - Chỉ dùng đường dẫn chính xác tồn tại trong project hoặc testcase được cung cấp. Nếu chưa xác định được file gốc từ bằng chứng thì để danh sách rỗng, không đoán file.
+
+BƯỚC 1B: ĐỀ XUẤT CÁCH SỬA CÓ THỂ THỰC THI:
+1. Đối chiếu root cause với code hiện tại, API/signature thực tế, plan và specification trước khi đề xuất thay đổi.
+2. Chỉ dẫn sửa phải cụ thể: nêu file cần sửa, lỗi cần xử lý và thay đổi tối thiểu đủ khắc phục root cause. Đảm bảo thay đổi phù hợp với ngôn ngữ và kiểu đối tượng thực tế.
+3. Không đề xuất gọi method/field/import/constructor chưa tồn tại hoặc không phù hợp với kiểu đối tượng. Không đưa ra hướng dẫn chung chung, lặp lại chính dòng gây lỗi, hay chỉ thị không làm thay đổi nguyên nhân.
+4. Trước khi trả kết quả, tự kiểm tra: nếu làm đúng instructions thì lỗi trong log có được loại bỏ không, và thay đổi có tạo lỗi mới hoặc vi phạm specification không? Nếu không thể xác minh, nêu giới hạn thay vì đoán.
+5. Ưu tiên bản sửa nhỏ nhất và chỉ liệt kê file thực sự cần thay đổi. Nếu log có nhiều root cause độc lập, ghi rõ chúng và cách sửa tương ứng trong instructions, đồng thời chọn target cần xử lý ở vòng hiện tại.
 
 BƯỚC 2: CÂY QUYẾT ĐỊNH PHÂN ĐỊNH TRÁCH NHIỆM (CHỌN DUY NHẤT 1 TARGET):
 
@@ -117,9 +128,9 @@ Trả về DUY NHẤT một JSON Object hợp lệ:
 "status": "REJECTED",
 "target": "PLANNER" | "CODER" | "TESTER",
 "error_category": "GLOBAL" | "LOCAL" | "TESTCASE",
-"failed_files": ["danh_sách", "các_file", "thực_sự_bị_lỗi_cần_sửa"],
-"root_cause": "nguyên nhân kỹ thuật cốt lõi kèm vị trí file và dòng bị lỗi",
-"instructions": "chỉ thị sửa đổi cho các file cụ thể cho target agent",
+"failed_files": ["chỉ các file chứa nguyên nhân gốc cần sửa, không gồm caller hoặc file chỉ được nhắc tới"],
+"root_cause": "nguyên nhân đã xác minh và vị trí phát sinh thực sự; phân biệt với nơi lỗi được gọi hoặc phát hiện",
+"instructions": "cách sửa tối thiểu, cụ thể, hợp lệ với code/API thực tế; nêu file và thay đổi cần thực hiện",
 "audit_table": "tóm tắt đối chiếu"
 }}
 """

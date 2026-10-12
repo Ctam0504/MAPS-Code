@@ -61,9 +61,14 @@ QUY TẮC BẮT BUỘC CHO PYTHON:
         feedback: Optional[str] = None
     ) -> str:
         """
-        Sinh mã nguồn hoàn chỉnh cho một tệp tin cụ thể (hỗ trợ CREATE hoặc MODIFY).
+        Sinh mã nguồn cho CREATE/MODIFY hoặc giữ nguyên nội dung với KEEP.
         """
-        if file_spec.action.upper() == "KEEP" and file_spec.filepath in created_files_context:
+        action = file_spec.action.strip().upper()
+        if action == "KEEP":
+            if file_spec.filepath not in created_files_context:
+                raise ValueError(
+                    f"FileSpec action KEEP requires existing content for '{file_spec.filepath}'."
+                )
             return created_files_context[file_spec.filepath]
 
         dep_context = ""
@@ -86,7 +91,7 @@ YÊU CẦU ĐẶC BIỆT: Khắc phục triệt để các lỗi biên dịch, t
 
         existing_code_section = ""
         current_existing = created_files_context.get(file_spec.filepath, "")
-        if file_spec.action.upper() == "MODIFY" and current_existing:
+        if action == "MODIFY" and current_existing:
             existing_code_section = f"""
 ### [MÃ NGUỒN TIỀN SẮP XẾP HIỆN CÓ CỦA TỆP `{file_spec.filepath}` CẦN SỬA ĐỔI / HOÀN THIỆN]:
 ```{target_language}
@@ -142,7 +147,7 @@ Nhiệm vụ: Viết mã nguồn HOÀN CHỈNH cho tệp tin: `{file_spec.filepa
     ) -> Dict[str, str]:
         """
         Sinh toàn bộ các file theo thứ tự Topo (execution_order) trong kế hoạch.
-        Kế thừa toàn bộ các file từ thư mục tiền sắp xếp (initial_files).
+        Kế thừa toàn bộ các file được truyền vào (initial_files).
         Hỗ trợ lọc ngữ cảnh chia sẻ qua shared_memory và kế thừa feedback sửa lỗi.
         """
         created_files: Dict[str, str] = dict(initial_files) if initial_files else {}
@@ -157,11 +162,16 @@ Nhiệm vụ: Viết mã nguồn HOÀN CHỈNH cho tệp tin: `{file_spec.filepa
                 continue
             spec = spec_map[filepath]
 
-            if spec.action.upper() == "KEEP" and filepath in created_files:
-                print(f"   📁 [Coder] Giữ nguyên tệp tiền sắp xếp: {filepath}")
+            action = spec.action.strip().upper()
+            if action == "KEEP":
+                if filepath not in created_files:
+                    raise ValueError(
+                        f"FileSpec action KEEP requires existing content for '{filepath}'."
+                    )
+                print(f"   📁 [Coder] Giữ nguyên tệp hiện tại: {filepath}")
                 continue
 
-            action_label = "Sửa đổi" if spec.action.upper() == "MODIFY" else "Sinh mới"
+            action_label = "Sửa đổi" if action == "MODIFY" else "Sinh mới"
             print(f"   💻 [Coder] {action_label} tệp: {filepath} ({plan.target_language.upper()})...")
 
             # Lọc ngữ cảnh các tệp phụ thuộc/đã tạo nếu bật/tắt shared_memory

@@ -395,7 +395,7 @@ class MultiAgentCoordinator:
                 self.current_files = self.coder.generate_all_files(
                     plan=self.current_plan,
                     task_goal=task_prompt,
-                    initial_files=self.initial_files,
+                    initial_files=self.current_files,
                     output_dir=self.output_dir,
                     shared_memory=self.memory,
                     feedback=f"{decision.root_cause}\n{decision.instructions}"
