@@ -89,7 +89,7 @@ BƯỚC 1B: ĐỀ XUẤT CÁCH SỬA CÓ THỂ THỰC THI:
 2. Chỉ dẫn sửa phải cụ thể: nêu file cần sửa, lỗi cần xử lý và thay đổi tối thiểu đủ khắc phục root cause. Đảm bảo thay đổi phù hợp với ngôn ngữ và kiểu đối tượng thực tế.
 3. Không đề xuất gọi method/field/import/constructor chưa tồn tại hoặc không phù hợp với kiểu đối tượng. Không đưa ra hướng dẫn chung chung, lặp lại chính dòng gây lỗi, hay chỉ thị không làm thay đổi nguyên nhân.
 4. Trước khi trả kết quả, tự kiểm tra: nếu làm đúng instructions thì lỗi trong log có được loại bỏ không, và thay đổi có tạo lỗi mới hoặc vi phạm specification không? Nếu không thể xác minh, nêu giới hạn thay vì đoán.
-5. Ưu tiên bản sửa nhỏ nhất và chỉ liệt kê file thực sự cần thay đổi. Nếu log có nhiều root cause độc lập, ghi rõ chúng và cách sửa tương ứng trong instructions, đồng thời chọn target cần xử lý ở vòng hiện tại.
+5. Ưu tiên sửa file có khả năng giảm lỗi nhiều nhất và chỉ liệt kê file thực sự cần thay đổi. Nếu log có nhiều root cause độc lập, ghi rõ chúng và cách sửa tương ứng trong instructions, đồng thời chọn target cần xử lý ở vòng hiện tại.
 
 BƯỚC 2: CÂY QUYẾT ĐỊNH PHÂN ĐỊNH TRÁCH NHIỆM (CHỌN DUY NHẤT 1 TARGET):
 
@@ -130,7 +130,7 @@ Trả về DUY NHẤT một JSON Object hợp lệ:
 "error_category": "GLOBAL" | "LOCAL" | "TESTCASE",
 "failed_files": ["chỉ các file chứa nguyên nhân gốc cần sửa, không gồm caller hoặc file chỉ được nhắc tới"],
 "root_cause": "nguyên nhân đã xác minh và vị trí phát sinh thực sự; phân biệt với nơi lỗi được gọi hoặc phát hiện",
-"instructions": "cách sửa tối thiểu, cụ thể, hợp lệ với code/API thực tế; nêu file và thay đổi cần thực hiện",
+"instructions": "cách sửa tối thiểu, cụ thể, hợp lệ với code/API thực tế; nêu file và thay đổi cần thực hiện, không đưa ra hướng dẫn chung chung",
 "audit_table": "tóm tắt đối chiếu"
 }}
 """

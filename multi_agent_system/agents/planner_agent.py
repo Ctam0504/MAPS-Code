@@ -126,7 +126,7 @@ QUY TẮC BẮT BUỘC DÀNH CHO PYTHON:
         # 3. Tạo Prompt lập kế hoạch kiến trúc
         guidelines = self._get_language_guidelines(resolved_lang)
         json_schema_desc = """
-Trả về DUY NHẤT một JSON Object hợp lệ theo cấu trúc sau:
+Trả về DUY NHẤT một JSON Object tuyệt đối hợp lệ theo cấu trúc sau:
 {
   "target_language": "%s",
   "architecture_pattern": "Mẫu kiến trúc sử dụng (vd: Clean Architecture, Modular)",
@@ -223,6 +223,7 @@ Yêu cầu bài toán: {task_prompt}
 {error_log}
 
 ### [CHỈ THỊ SỬA ĐỔI TỪ REVIEWER]:
+Dựa vào chỉ thị sửa đổi và nhật ký lỗi, hãy tìm ra lỗi ở đâu trong plan và chỉnh sửa lại kế hoạch kiến trúc đa tệp sao cho phù hợp với yêu cầu bài toán.
 {reviewer_instructions}
 
 {rag_section}
@@ -232,9 +233,9 @@ Yêu cầu bài toán: {task_prompt}
 {guidelines}
 
 ### [NHIỆM VỤ]:
-Hãy kế thừa, tái sử dụng các tệp, class, struct, hàm và package sẵn có trong thư mục này, chuẩn hóa lại tên class/hàm/interface signatures giữa các file, hoặc bổ sung/loại bỏ file cần thiết.
+Hãy kế thừa, tái sử dụng các tệp, class, struct, hàm và package sẵn có trong thư mục này, chuẩn hóa, sửa đổi lại tên class/hàm/interface signatures giữa các file, hoặc bổ sung/loại bỏ file cần thiết.
 ### Quy tắc sửa lỗi:
-- Tuân thủ yêu cầu bài toán, chỉ sửa đổi những file cần thiết, giữ nguyên các file đã đúng.
+- Tuân thủ yêu cầu bài toán, chỉ thị sửa lỗi và nhật ký lỗi, chỉ sửa đổi những file cần thiết, giữ nguyên các file đã đúng.
 - Nếu cần tạo file mới, hãy thêm vào danh sách `files` với `action: "CREATE"`.
 - Nếu file hiện tại cần sửa đổi, hãy đặt `action: "MODIFY"` và cập nhật `interface_summary` tương ứng.
 - Nếu file hiện tại không cần sửa đổi, hãy giữ nguyên `action: "KEEP"` và không thay đổi nội dung.

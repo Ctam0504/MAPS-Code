@@ -59,6 +59,7 @@ DEFAULT_TARGET_LANGUAGE: str = "c"
 #             False để chạy Local Native Subprocess (siêu nhẹ trên Windows/Linux)
 SANDBOX_USE_DOCKER: bool = False
 SANDBOX_DOCKER_BASE_IMAGE: str = "gcc:latest"
+SANDBOX_DOCKER_JAVA_IMAGE: str = "eclipse-temurin:17-jdk"
 SANDBOX_TIMEOUT_SECONDS: float = 15.0
 SANDBOX_MEMORY_LIMIT_MB: int = 512
 

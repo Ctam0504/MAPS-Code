@@ -28,6 +28,7 @@ except ImportError:
 class MultiFileSandboxEngine:
     def __init__(self, use_docker: Optional[bool] = None, base_image: Optional[str] = None):
         self.use_docker = use_docker if use_docker is not None else config.SANDBOX_USE_DOCKER
+        self.custom_base_image = base_image is not None
         self.base_image = base_image or config.SANDBOX_DOCKER_BASE_IMAGE
         self.client = None
 
@@ -78,8 +79,11 @@ class MultiFileSandboxEngine:
         start_time: float
     ) -> ExecutionResult:
         try:
+            image = self.base_image
+            if req.language.lower().strip() == "java" and not self.custom_base_image:
+                image = config.SANDBOX_DOCKER_JAVA_IMAGE
             container = self.client.containers.run(
-                image=self.base_image,
+                image=image,
                 command=exec_cmd,
                 volumes={host_dir: {'bind': '/workspace', 'mode': 'rw'}},
                 network_mode="none",

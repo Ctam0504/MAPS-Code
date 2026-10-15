@@ -7,7 +7,7 @@ Không cần execution để kiểm thử. Khi hoàn thiện mới bắt đầu 
 Kiến trúc:
 Agent planner: Tiếp nhận yêu cầu, đọc cây thư mục bằng GraphRAG đã xây dựng, xác định ngôn ngữ mã nguồn nếu có sẵn bằng tools, giao task cho coder, sửa đổi nếu được yêu cầu từ reviewer
 Agent coder: Tiếp nhận task từ planner, sinh mã nguồn dựa trên ngôn ngữ do planner đưa ra, sửa đổi nếu được yêu cầu từ reviewer
-Agent Tester: Tiếp nhận task, code và ngôn ngữ do planner đưa ra, sinh ra testcase, sửa đổi nếu được yêu cầu từ reviewer
+Agent Tester: Tiếp nhận task, code và ngôn ngữ do planner đưa ra, sinh ra testcase, sửa đổi nếu được yêu cầu từ reviewer. Java sử dụng JUnit 5; sandbox compile và chạy JUnit suite tương tự cách Python dùng unittest.
 Agent reviewer: Tiếp nhận task, code, testcase và cây thư mục. Từ đó quyết định xem nếu có mâu thuẫn thì planner, coder và tester ai là người sai
 Workflow:
 Người dùng nhập task và thiết lập folder input (có thể rỗng hoặc có file)

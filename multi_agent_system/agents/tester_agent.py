@@ -42,15 +42,22 @@ class TestMultiFileProject(unittest.TestCase):
         elif lang_lower == "java":
             return """
 ĐỊNH DẠNG TESTCASE CHO JAVA:
-Viết một class `public class TestHarness` hoàn chỉnh chứa `public static void main(String[] args)`.
-LƯU Ý CỰC KỲ QUAN TRỌNG VỀ JAVA:
-1. TUYỆT ĐỐI KHÔNG KHAI BÁO `package ...;` vì file TestHarness.java nằm tại root thư mục dự án (default package).
-2. Hãy import các package cần thiết từ mã nguồn đã tạo (ví dụ: `import models.*; import services.*; import controllers.*;`).
-3. Khởi tạo đối tượng đúng constructor và truyền đúng tham số đã khai báo trong code của Coder.
-4. Nếu kiểm tra thất bại, ném ra RuntimeException:
-   if (result == null) {
-       throw new RuntimeException("Test failed: result is null");
-   }
+Sinh một test class JUnit 5 tên `TestHarness` trong default package.
+1. Dùng `org.junit.jupiter.api.Test` và assertion từ `org.junit.jupiter.api.Assertions`.
+2. Mỗi test là một method `void` không tham số có annotation `@Test`; không viết hàm `main`.
+3. Sandbox sẽ tự compile source và test, phát hiện/chạy test bằng JUnit, và trả lỗi khi assertion fail.
+4. TestHarness phải ở default package; import chính xác package public của source.
+5. Chỉ khởi tạo đối tượng theo constructor và signature thực sự có trong source.
+Ví dụ:
+import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.*;
+
+public class TestHarness {
+    @Test
+    void testFeature() {
+        assertEquals(expected, actual, "mô tả ngắn");
+    }
+}
 """
         else:  # c
             return """
@@ -153,7 +160,8 @@ Testcase của bạn đã gặp **LỖI TESTCASE (TESTER FAULTY)**: Reviewer xá
 
 ### [NHIỆM VỤ]:
 1. Phân tích chỉ thị của Reviewer và chỉ ra chính xác các test assertion / điều kiện cần sửa.
-2. Viết lại bộ testcase hoàn chỉnh đã khắc phục toàn bộ lỗi trên.
+2. Tuân thủ tuyệt đối chỉ thị sửa lỗi.
+3. Viết lại bộ testcase hoàn chỉnh đã khắc phục toàn bộ lỗi trên.
 ### [NGỮ CẢNH]:
 1. Mã kiểm thử sinh ra nằm ở thư mục gốc của dự án. Cùng cấp với filepath.
 2. Dựa vào ngữ cảnh sinh ra import/include chính xác.
