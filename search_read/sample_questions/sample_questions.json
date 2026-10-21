@@ -1,0 +1,10 @@
+[
+  {
+    "id": "Q001",
+    "question": "Trong thư mục python, PaymentProcessor được khởi tạo và nhận đối tượng gì? Phương thức execute hoạt động ra sao?"
+  },
+  {
+    "id": "Q002",
+    "question": "Trong thư mục C, các chiến lược thanh toán (payment strategy) nào được định nghĩa trong src và include?"
+  }
+]

@@ -1,0 +1,1 @@
+Implement a payment processor that delegates to its configured strategy. A valid positive payment returns success (1) and prints the strategy's confirmation. Invalid amounts return failure (0) and populate the gateway error.

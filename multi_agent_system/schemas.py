@@ -7,7 +7,8 @@ dành cho toàn bộ hệ thống Multi-Agent Code Generation.
 
 from enum import Enum
 from typing import List, Dict, Optional, Any
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, AliasChoices
+
 
 # ==============================================================================
 # 1. NGÔN NGỮ LẬP TRÌNH ĐƯỢC HỖ TRỢ
@@ -31,53 +32,31 @@ class LanguageType(str, Enum):
 # ==============================================================================
 # 2. SCHEMA KẾ HOẠCH ĐA TỆP (PLANNER -> CODER)
 # ==============================================================================
+
+
 class FileSpec(BaseModel):
-    filepath: str = Field(
-        ..., 
-        description="Đường dẫn tương đối của file kèm đuôi (.py, .java, .c, .h), ví dụ: 'models/user.py'"
-    )
-    action: str = Field(
-        default="CREATE", 
-        description="Hành động đối với file: 'CREATE' hoặc 'MODIFY'"
-    )
-    dependencies: List[str] = Field(
-        default_factory=list,
-        description="Danh sách filepath nội bộ chính xác mà file này trực tiếp phụ thuộc"
-    )
-    external_dependencies: List[str] = Field(
-        default_factory=list,
-        description="Danh sách thư viện hoặc package bên ngoài mà file này sử dụng"
-    )
+    filepath: str = Field(..., description="Đường dẫn file")
+    action: str = Field(default="CREATE", description="CREATE / MODIFY / KEEP")
+    dependencies: List[str] = Field(default_factory=list)
+    external_dependencies: List[str] = Field(default_factory=list)
     purpose: str = Field(
-        ..., 
-        description="Mục đích và trách nhiệm nghiệp vụ của file này"
+        default="Triển khai logic module",
+        validation_alias=AliasChoices("purpose", "description", "summary")
     )
     interface_summary: str = Field(
-        ..., 
-        description="Mô tả chi tiết các Class, Struct, Function signatures, parameters và return types"
+        default="",
+        validation_alias=AliasChoices("interface_summary", "interfaces", "interface", "signatures")
     )
 
 class MultiFilePlan(BaseModel):
-    target_language: str = Field(
-        ..., 
-        description="Ngôn ngữ đích: 'python', 'java', hoặc 'c'"
-    )
-    architecture_pattern: str = Field(
-        default="Modular Architecture", 
-        description="Mẫu kiến trúc thiết kế (ví dụ: Clean Architecture, Layered, Header-Source separation)"
-    )
+    target_language: str = Field(default="python")
+    architecture_pattern: str = Field(default="Modular Architecture")
     execution_order: List[str] = Field(
-        ..., 
-        description="Thứ tự Topo sinh file từ Leaf (file độc lập, models/headers) đến Root (file tích hợp/main)"
+        default_factory=list,
+        validation_alias=AliasChoices("execution_order", "order", "build_order")
     )
-    files: List[FileSpec] = Field(
-        ..., 
-        description="Danh sách các file cần sinh mã nguồn"
-    )
-    rationale: Optional[str] = Field(
-        default="", 
-        description="Giải thích lý do lựa chọn cấu trúc này"
-    )
+    files: List[FileSpec] = Field(default_factory=list)
+    rationale: Optional[str] = Field(default="")
 
 # ==============================================================================
 # 3. SCHEMA THỰC THI KIỂM THỬ (SANDBOX ENGINE)

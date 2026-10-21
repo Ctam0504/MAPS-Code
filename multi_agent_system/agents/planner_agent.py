@@ -7,7 +7,11 @@ khi nhận phản hồi lỗi Global từ Reviewer.
 """
 
 import os
-from typing import Optional, Any
+import json
+import re
+from typing import Optional, Any, Dict, List
+from pydantic import ValidationError
+
 from .base_agent import BaseAgent
 from ..schemas import MultiFilePlan, FileSpec, LanguageType
 from ..tools.language_detector import detect_language_from_folder
@@ -36,7 +40,7 @@ QUY TẮC BẮT BUỘC DÀNH CHO JAVA:
 1. Mọi `filepath` phải có đuôi `.java` và tuân thủ chuẩn cấu trúc package (ví dụ: `models/User.java`, `services/UserService.java`).
 2. Tên Class PHẢI TRÙNG KHỚP 100% với tên file `.java` (ví dụ: `public class User` trong `User.java`).
 3. Khai báo `package` ở đầu mỗi file phù hợp với đường dẫn thư mục.
-4. Đảm bảo import, dependancy đầy đủ giữa các package dựa trên cây thư mục.
+4. Đảm bảo import, dependency đầy đủ giữa các package dựa trên cây thư mục.
 """
         elif lang_lower in ["c", "cpp"]:
             return """
@@ -60,30 +64,141 @@ QUY TẮC BẮT BUỘC DÀNH CHO PYTHON:
         else:
             structure = generate_ascii_tree(folder)
 
-        print(
-            "\n🌳 [Planner: Draw] Cây thư mục hiện tại:\n"
-            f"{structure}"
-        )
+        print(f"\n🌳 [Planner: Draw] Cây thư mục hiện tại:\n{structure}")
         return structure
 
     async def _retrieve_graphrag_context(self, folder: Optional[str]) -> str:
         if not folder or not os.path.exists(folder):
             return ""
-
         try:
             graph, _ = parse_codebase_to_graph_and_chunks(folder)
             if graph.number_of_nodes() == 0:
                 return ""
-
-            context = GraphRAGRetriever.get_codebase_manifest(graph)
-            print(
-                "\n📚 [Planner: GraphRAG] Toàn bộ manifest từ graph:\n"
-                f"{context or '[Không có context được truy xuất.]'}\n"
-            )
-            return context
+            return GraphRAGRetriever.get_codebase_manifest(graph)
         except Exception as e:
             print(f"⚠️ [Planner] Bỏ qua trích xuất GraphRAG do lỗi: {e}")
             return ""
+
+    def _sanitize_plan_dict(self, data: Dict[str, Any], default_lang: str) -> Dict[str, Any]:
+        """
+        Tiền xử lý và làm sạch Dict thô từ LLM trước khi nạp vào Pydantic 
+        nhằm tránh các lỗi thường gặp như null, sai kiểu, thiếu list...
+        """
+        if not isinstance(data, dict):
+            return {}
+
+        # 1. target_language chuẩn hóa
+        target_lang = str(data.get("target_language") or default_lang).lower().strip()
+        data["target_language"] = target_lang
+
+        # 2. Xử lý danh sách files
+        raw_files = data.get("files", [])
+        if not isinstance(raw_files, list):
+            raw_files = []
+
+        sanitized_files = []
+        all_filepaths = []
+
+        for f in raw_files:
+            if not isinstance(f, dict) or not f.get("filepath"):
+                continue
+
+            filepath = str(f.get("filepath")).strip().replace("\\", "/")
+            all_filepaths.append(filepath)
+
+            # Chuẩn hóa action về dạng UPPERCASE chuẩn
+            raw_action = str(f.get("action", "CREATE")).upper()
+            if "MODIFY" in raw_action:
+                action = "MODIFY"
+            elif "KEEP" in raw_action:
+                action = "KEEP"
+            else:
+                action = "CREATE"
+
+            # Đảm bảo các field list không bao giờ là None
+            deps = f.get("dependencies")
+            if not isinstance(deps, list):
+                deps = []
+
+            ext_deps = f.get("external_dependencies")
+            if not isinstance(ext_deps, list):
+                ext_deps = []
+
+            sanitized_files.append({
+                "filepath": filepath,
+                "action": action,
+                "dependencies": [str(d) for d in deps if d],
+                "external_dependencies": [str(e) for e in ext_deps if e],
+                "purpose": str(f.get("purpose") or "Triển khai mã nguồn"),
+                "interface_summary": str(f.get("interface_summary") or "")
+            })
+
+        data["files"] = sanitized_files
+
+        # 3. Đồng bộ execution_order để tránh lỗi không khớp filepath
+        exec_order = data.get("execution_order")
+        if not isinstance(exec_order, list) or not exec_order:
+            data["execution_order"] = all_filepaths
+        else:
+            cleaned_order = [str(x).strip().replace("\\", "/") for x in exec_order if str(x).strip()]
+            for fp in all_filepaths:
+                if fp not in cleaned_order:
+                    cleaned_order.append(fp)
+            data["execution_order"] = cleaned_order
+
+        # 4. Các trường string mặc định
+        if not data.get("architecture_pattern"):
+            data["architecture_pattern"] = "Modular Architecture"
+        if not data.get("rationale"):
+            data["rationale"] = "Thiết kế phân tầng theo yêu cầu hệ thống."
+
+        return data
+
+    def _try_validate_or_retry(self, prompt: str, default_lang: str, max_retries: int = 2) -> Optional[MultiFilePlan]:
+        """
+        Gọi LLM, trích xuất JSON, làm sạch và Validate. Nếu lỗi, phản hồi lại ValidationError cho LLM sửa.
+        """
+        current_prompt = prompt
+        
+        for attempt in range(max_retries + 1):
+            response_text = self.call_llm(current_prompt, format_json=True)
+            json_obj = self.extract_json_object(response_text)
+
+            if json_obj:
+                sanitized_dict = self._sanitize_plan_dict(json_obj, default_lang)
+                try:
+                    return MultiFilePlan.model_validate(sanitized_dict)
+                except ValidationError as ve:
+                    print(f"⚠️ [Planner] Lỗi Pydantic ở lần thử {attempt + 1}: {ve}")
+                    if attempt < max_retries:
+                        current_prompt = f"""Dữ liệu JSON bạn vừa trả về gây ra lỗi Pydantic sau:
+{str(ve)}
+
+Hãy SỬA LẠI và chỉ trả về DUY NHẤT một JSON hợp lệ tuân thủ chính xác Schema. Không kèm Markdown hay lời dẫn."""
+            else:
+                print(f"⚠️ [Planner] Không parse được JSON ở lần thử {attempt + 1}")
+
+        return None
+
+    def _get_fallback_plan(self, resolved_lang: str) -> MultiFilePlan:
+        """Tạo plan dự phòng nếu LLM hoàn toàn thất bại trong việc trả về JSON chuẩn."""
+        ext = 'py' if resolved_lang == 'python' else ('java' if resolved_lang == 'java' else 'c')
+        default_file = f"main.{ext}"
+        return MultiFilePlan(
+            target_language=resolved_lang,
+            architecture_pattern="Single Module Fallback",
+            execution_order=[default_file],
+            files=[
+                FileSpec(
+                    filepath=default_file,
+                    action="CREATE",
+                    dependencies=[],
+                    purpose="Triển khai toàn bộ giải pháp cho bài toán",
+                    interface_summary="Tất cả các hàm và class cần thiết"
+                )
+            ],
+            rationale="Fallback do LLM trả về cấu trúc không chuẩn."
+        )
 
     async def plan_codebase(
         self, 
@@ -91,9 +206,6 @@ QUY TẮC BẮT BUỘC DÀNH CHO PYTHON:
         input_folder: Optional[str] = None, 
         target_language: Optional[str] = None
     ) -> MultiFilePlan:
-        """
-        Khởi tạo kế hoạch đa tệp dựa trên yêu cầu và ngữ cảnh GraphRAG.
-        """
         # 1. Xác định ngôn ngữ lập trình
         resolved_lang: Optional[str] = target_language
         if not resolved_lang and input_folder and os.path.exists(input_folder):
@@ -101,29 +213,22 @@ QUY TẮC BẮT BUỘC DÀNH CHO PYTHON:
             if detected:
                 resolved_lang = detected.value
 
-        # Nếu không có thư mục sẵn, phân tích từ task_prompt
         if not resolved_lang and task_prompt:
             task_lower = task_prompt.lower()
-            if any(k in task_lower for k in ["java", "spring", "springboot", "maven", "gradle"]):
+            if any(k in task_lower for k in ["java", "spring", "maven", "gradle"]):
                 resolved_lang = "java"
-            elif any(k in task_lower for k in ["c++", "cpp", "ngôn ngữ c", "lập trình c", " file .c", " file .h"]):
+            elif any(k in task_lower for k in ["c++", "cpp", "ngôn ngữ c", "lập trình c"]):
                 resolved_lang = "c"
-            elif any(k in task_lower for k in ["python", "django", "fastapi", "flask", "pytest"]):
+            elif any(k in task_lower for k in ["python", "fastapi", "django"]):
                 resolved_lang = "python"
 
-        # Fallback theo cấu hình config.py (mặc định java hoặc giá trị người dùng cấu hình)
         if not resolved_lang:
             resolved_lang = getattr(config, "DEFAULT_TARGET_LANGUAGE", "java")
 
-        # 2. Phân tích ngữ cảnh Codebase hiện hữu bằng GraphRAG nếu có
+        # 2. Phân tích ngữ cảnh
         graphrag_context = await self._retrieve_graphrag_context(input_folder)
-
         rag_section = f"\n### [Thông tin folder tập tin hiện tại]:\n{graphrag_context}\n" if graphrag_context else ""
-        folder_structure = (
-            f"\n### [Cây thư mục hiện tại]:\n"
-            f"{await self.draw_folder_structure(input_folder)}\n"
-        )
-        # 3. Tạo Prompt lập kế hoạch kiến trúc
+        folder_structure = f"\n### [Cây thư mục hiện tại]:\n{await self.draw_folder_structure(input_folder)}\n"
         guidelines = self._get_language_guidelines(resolved_lang)
         json_schema_desc = """
 Trả về DUY NHẤT một JSON Object tuyệt đối hợp lệ theo cấu trúc sau:
@@ -173,29 +278,12 @@ Chỉ trả về JSON object thuần túy, không chèn lời mở đầu hay k�
 {json_schema_desc}
 """
 
-        response_text = self.call_llm(prompt, format_json=True)
-        json_obj = self.extract_json_object(response_text)
+        # Gọi qua cơ chế Validate + Self-Retry + Sanitization
+        plan = self._try_validate_or_retry(prompt, resolved_lang, max_retries=2)
+        if plan:
+            return plan
 
-        if not json_obj or "files" not in json_obj:
-            # Fallback tối thiểu nếu LLM không trả về JSON chuẩn
-            default_file = f"solution.{'py' if resolved_lang == 'python' else ('java' if resolved_lang == 'java' else 'c')}"
-            return MultiFilePlan(
-                target_language=resolved_lang,
-                architecture_pattern="Single Module Fallback",
-                execution_order=[default_file],
-                files=[
-                    FileSpec(
-                        filepath=default_file,
-                        action="CREATE",
-                        dependencies=[],
-                        purpose="Triển khai toàn bộ giải pháp cho bài toán",
-                        interface_summary="Tất cả các hàm và class cần thiết"
-                    )
-                ],
-                rationale="Fallback do LLM trả về cấu trúc không chuẩn."
-            )
-
-        return MultiFilePlan.model_validate(json_obj)
+        return self._get_fallback_plan(resolved_lang)
 
     async def refine_plan(
         self,
@@ -258,13 +346,9 @@ Trả về DUY NHẤT một JSON Object hợp lệ của `MultiFilePlan`:
 }}
 """
 
-        response_text = self.call_llm(prompt, format_json=True)
-        json_obj = self.extract_json_object(response_text)
-        
-        if json_obj and "files" in json_obj:
-            try:
-                return MultiFilePlan.model_validate(json_obj)
-            except Exception as e:
-                print(f"⚠️ [Planner] Lỗi validate JSON khi refine_plan: {e}")
+        # Sử dụng try-validate-retry cả trong bước refine
+        refined_plan = self._try_validate_or_retry(prompt, current_plan.target_language, max_retries=2)
+        if refined_plan:
+            return refined_plan
 
         return current_plan

@@ -1,0 +1,25 @@
+{
+  "target_language": "python",
+  "architecture_pattern": "Strategy",
+  "execution_order": [
+    "models/currency.py",
+    "models/payment_request.py",
+    "exceptions/gateway_exception.py",
+    "strategies/base_strategy.py",
+    "strategies/credit_card_strategy.py",
+    "strategies/paypal_strategy.py",
+    "services/payment_processor.py",
+    "main.py"
+  ],
+  "files": [
+    {"filepath": "models/currency.py", "action": "CREATE", "dependencies": [], "external_dependencies": [], "purpose": "Supported payment currencies.", "interface_summary": "Currency enum with USD and VND."},
+    {"filepath": "models/payment_request.py", "action": "CREATE", "dependencies": ["models/currency.py"], "external_dependencies": [], "purpose": "Payment request data.", "interface_summary": "PaymentRequest(request_id, amount, currency)."},
+    {"filepath": "exceptions/gateway_exception.py", "action": "CREATE", "dependencies": [], "external_dependencies": [], "purpose": "Invalid payment exception.", "interface_summary": "GatewayException is an Exception carrying a message."},
+    {"filepath": "strategies/base_strategy.py", "action": "CREATE", "dependencies": ["models/payment_request.py"], "external_dependencies": [], "purpose": "Strategy contract.", "interface_summary": "IPaymentStrategy.pay(request) returns bool."},
+    {"filepath": "strategies/credit_card_strategy.py", "action": "CREATE", "dependencies": ["strategies/base_strategy.py", "models/payment_request.py", "exceptions/gateway_exception.py"], "external_dependencies": [], "purpose": "Credit card payments.", "interface_summary": "Positive amount returns True; invalid amount raises GatewayException."},
+    {"filepath": "strategies/paypal_strategy.py", "action": "CREATE", "dependencies": ["strategies/base_strategy.py", "models/payment_request.py", "exceptions/gateway_exception.py"], "external_dependencies": [], "purpose": "PayPal payments.", "interface_summary": "Positive amount returns True; invalid amount raises GatewayException."},
+    {"filepath": "services/payment_processor.py", "action": "CREATE", "dependencies": ["strategies/base_strategy.py", "models/payment_request.py"], "external_dependencies": [], "purpose": "Delegate payment to selected strategy.", "interface_summary": "PaymentProcessor(strategy), set_strategy(strategy), execute(request) returns bool."},
+    {"filepath": "main.py", "action": "CREATE", "dependencies": ["services/payment_processor.py", "strategies/paypal_strategy.py", "models/payment_request.py", "models/currency.py"], "external_dependencies": [], "purpose": "Example application.", "interface_summary": "Runs a PayPal payment."}
+  ],
+  "rationale": "Separate request models, processor, and interchangeable strategy implementations."
+}

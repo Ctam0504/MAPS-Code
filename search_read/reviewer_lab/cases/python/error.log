@@ -1,0 +1,9 @@
+============================= test session starts =============================
+FAILED test_harness.py::test_successful_paypal_payment - assert False is True
+Traceback (most recent call last):
+  File "test_harness.py", line 4, in test_successful_paypal_payment
+    assert processor.execute(request) is True
+  File "services/payment_processor.py", line 12, in execute
+    return self.strategy.pay(request)
+AssertionError: assert False is True
+=========================== short test summary info ===========================

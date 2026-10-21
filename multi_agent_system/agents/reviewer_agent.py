@@ -7,89 +7,380 @@ Thẩm định nguyên nhân cốt lõi và phân định chính xác:
 - CODER: Lỗi Local (cú pháp nội bộ trong 1 file, lỗi logic cài đặt thân hàm)
 - TESTER: Lỗi Testcase (assert sai kỳ vọng, testcase vi phạm yêu cầu bài toán)
 """
-
+import os
+from pyexpat.errors import messages
+from openai import OpenAI
 import json
-from typing import Dict, Optional, Any, List
+from typing import Dict, Optional, Any, List, Tuple, Set
 from .base_agent import BaseAgent
 from ..schemas import MultiFilePlan, ReviewDecision, ReviewTarget
 from .. import config
 import re
+from ..tools.workspace_tools import WorkspaceTools
 class ReviewerAgent(BaseAgent):
+    max_tool_iterations: int = 10
     def __init__(
         self,
         model_name: Optional[str] = None,
-        base_url: Optional[str] = None
+        base_url: Optional[str] = None,
+        max_tool_iterations: int = 10
     ):
+        # 1. Gọi super().__init__ trước để khởi tạo self.base_url, self.model_name,...
         super().__init__(
             model_name=model_name or config.REVIEWER_MODEL,
             base_url=base_url,
             temperature=0.1
         )
+        
+        # 2. Bây giờ self.base_url đã tồn tại và đã được chuẩn hóa rstrip("/")
+        self.max_tool_iterations = max_tool_iterations
+        self.timeout = config.LLM_TIMEOUT
+        
+        api_base_url = self.base_url
+        if not api_base_url.endswith("/v1"):
+            api_base_url = f"{api_base_url}/v1"
+            
+        self.client = OpenAI(
+            base_url=api_base_url,
+            api_key=os.environ.get("OLLAMA_API_KEY", "ollama"),
+            timeout=self.timeout
+        )
+    def _extract_suspect_files_from_error(self, error_msg: str, known_files: List[str]) -> List[str]:
+        """Trích xuất tự động danh sách các file có khả năng gây lỗi từ stacktrace/error log."""
+        suspects = []
+        if not error_msg:
+            return suspects
 
+        # Quét tên file từ error log
+        pattern = r'([\w\/\.\-]+\.(?:py|java|c|cpp|h|hpp|js|ts|go|rs))(?::(\d+))?'
+        matches = re.findall(pattern, error_msg)
+
+        for match in matches:
+            filepath = match[0].strip()
+            # Khớp tương đối với known_files
+            for kf in known_files:
+                if filepath == kf or filepath.endswith("/" + kf) or kf.endswith("/" + filepath) or os.path.basename(filepath) == os.path.basename(kf):
+                    if kf not in suspects:
+                        suspects.append(kf)
+
+        # Ưu tiên các file xuất hiện trực tiếp trong plan
+        return suspects
+
+    def _truncate_error_log(self, error_msg: str, max_lines: int = 60) -> str:
+        """Thu gọn error log quá dài, giữ lại đầu và cuối stacktrace để tránh tràn context."""
+        lines = error_msg.strip().splitlines()
+        if len(lines) <= max_lines:
+            return error_msg
+        
+        half = max_lines // 2
+        return (
+            "\n".join(lines[:half]) 
+            + f"\n\n... [ĐÃ CẮT BỚT {len(lines) - max_lines} DÒNG LOG KHÔNG QUAN TRỌNG] ...\n\n" 
+            + "\n".join(lines[-half:])
+        )
+
+    def _detect_text_tool_call(self, text: str, tools_map: Dict[str, Any]) -> Optional[Tuple[str, Dict[str, Any]]]:
+        """
+        Bắt trường hợp LLM sinh text JSON gọi hàm thay vì gửi qua API tool_calls.
+        Ví dụ: {"name": "read_file", "arguments": {"file_path": "..."}}
+        """
+        if not text:
+            return None
+            
+        obj = self.extract_json_object(text)
+        if not obj or not isinstance(obj, dict):
+            return None
+
+        # Trường hợp 1: {"name": "read_file", "arguments": {...}}
+        func_name = obj.get("name") or obj.get("function") or obj.get("tool")
+        func_args = obj.get("arguments") or obj.get("parameters") or obj.get("args")
+
+        if func_name and func_name in tools_map:
+            if isinstance(func_args, str):
+                try:
+                    func_args = json.loads(func_args)
+                except Exception:
+                    pass
+            return str(func_name), func_args if isinstance(func_args, dict) else {}
+
+        # Trường hợp 2: {"action": "read_file", "action_input": {...}}
+        action = obj.get("action")
+        if action and action in tools_map:
+            action_input = obj.get("action_input", {})
+            return str(action), action_input if isinstance(action_input, dict) else {}
+
+        return None
+    def call_llm(self, prompt: str, format_json: bool = False) -> str:
+        """
+        Gọi LLM trực tiếp (dùng khi cần prompt đơn lẻ hoặc fallback).
+        """
+        try:
+            kwargs = {
+                "model": self.model_name,
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": self.temperature,
+            }
+            if format_json:
+                kwargs["response_format"] = {"type": "json_object"}
+
+            response = self.client.chat.completions.create(**kwargs)
+            return response.choices[0].message.content or ""
+        except Exception as e:
+            # Nếu LLM không hỗ trợ response_format={"type": "json_object"}, retry không format
+            if format_json:
+                try:
+                    response = self.client.chat.completions.create(
+                        model=self.model_name,
+                        messages=[{"role": "user", "content": prompt}],
+                        temperature=self.temperature,
+                    )
+                    return response.choices[0].message.content or ""
+                except Exception as inner_e:
+                    print(f"⚠️ [Reviewer] Lỗi call_llm retry: {inner_e}")
+            print(f"⚠️ [Reviewer] Lỗi call_llm: {e}")
+            return ""
+    @staticmethod
+    def extract_json_object(text: str) -> Optional[Dict[str, Any]]:
+        if not text:
+            return None
+        try:
+            parsed = json.loads(text.strip())
+            return parsed if isinstance(parsed, dict) else None
+        except json.JSONDecodeError:
+            match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
+            if match:
+                try:
+                    parsed = json.loads(match.group(1))
+                    return parsed if isinstance(parsed, dict) else None
+                except json.JSONDecodeError:
+                    pass
+            start, end = text.find("{"), text.rfind("}")
+            if start >= 0 and end > start:
+                try:
+                    parsed = json.loads(text[start:end + 1])
+                    return parsed if isinstance(parsed, dict) else None
+                except json.JSONDecodeError:
+                    return None
+            return None
+    def _execute_tool(self, tools_map: Dict[str, Any], func_name: str, args: Any) -> str:
+        """Thực thi tool từ tools_map của LangChain."""
+        print("\n" + "─"*50)
+        print(f"🔧 [Reviewer Tool Call] Tool : {func_name}")
+        print(f"📋 [Reviewer Tool Call] Args : {args}")
+        print("─"*50)
+        tool = tools_map.get(func_name)
+        if not tool:
+            return f"Lỗi: Không tìm thấy tool '{func_name}'."
+        try:
+            # LangChain tool hỗ trợ .invoke() (nhận dict hoặc string)
+            if isinstance(args, dict):
+                result = tool.invoke(args)
+            elif isinstance(args, str):
+                try:
+                    parsed_args = json.loads(args)
+                    result = tool.invoke(parsed_args)
+                except Exception:
+                    result = tool.invoke(args)
+            else:
+                result = tool.invoke(args or {})
+            return str(result)
+        except Exception as e:
+            return f"Lỗi khi thực thi tool '{func_name}': {str(e)}"
+    def _normalize_tool_args(self, args: Any) -> str:
+        if isinstance(args, dict):
+            return json.dumps(args, sort_keys=True)
+        return str(args)
     def review(
         self,
         task_goal: str,
         plan: MultiFilePlan,
         files_dict: Dict[str, str],
         test_cases: str,
-        error_msg: str
+        error_msg: str,
+        workspace_dir: str
     ) -> ReviewDecision:
-        """
-        Thẩm định log lỗi và phân định trách nhiệm.
-        """
+        all_project_files = [f.filepath for f in plan.files]
+        suspect_files = self._extract_suspect_files_from_error(error_msg, all_project_files)
+        clean_error_msg = self._truncate_error_log(error_msg, max_lines=50)
+        # 1. Khởi tạo Tools
+        ws_tools = WorkspaceTools(
+            workspace_dir=workspace_dir,
+            selected_tools=["read_file", "list_directory", "file_search"]
+        )
+        tools_map = {tool.name: tool for tool in ws_tools.get_tools()}
+        openai_tools = WorkspaceTools.get_tool_definitions(
+            workspace_dir=workspace_dir,
+            selected_tools=["read_file", "list_directory", "file_search"]
+        )
+
+        # =====================================================================
+        # PHA 1: ĐIỀU TRA MÃ NGUỒN (CHỈ DÙNG TOOLS)
+        # =====================================================================
+        investigate_prompt = f"""Bạn là Chuyên gia Phân tích Mã nguồn cấp cao.
+Nhiệm vụ: Truy vết nguyên nhân gốc gây ra log lỗi (Root Cause Analysis).
+
+### DỮ LIỆU ĐẦU VÀO:
+- Mục tiêu bài toán: {task_goal}
+- Kiến trúc: {plan.architecture_pattern}
+- Danh sách tệp dự án: {[f.filepath for f in plan.files]}
+- Các tệp bị nghi vấn trực tiếp từ Log lỗi: {suspect_files if suspect_files else "Xem log bên dưới để xác định"}
+- Log lỗi Sandbox:
+{clean_error_msg if clean_error_msg else "Không có log lỗi."}
+
+### QUY TRÌNH TRUY VẾT BẮT BUỘC (2-3 BƯỚC):
+- BƯỚC 1 (Xác định điểm sụp đổ):
+  Dùng `file_search` để tìm file A (file xuất hiện trong log lỗi). Sau đó dùng `read_file` để kiểm tra đoạn code tại đúng số dòng báo lỗi.
+
+- BƯỚC 2 (Truy vết đến File gốc - NẾU CẦN):
+  * Nếu file A bị lỗi do gọi đến một Class/Method/Interface thuộc File B (ví dụ):
+    -> Dùng `read_file` đọc nội dung File B để xem File B đã cài đặt đúng hợp đồng (contract) chưa.
+
+- BƯỚC 3 (Đánh giá nguyên nhân):
+  Chỉ dừng điều tra và trả về "ĐÃ ĐỦ THÔNG TIN" khi bạn đã đọc CẢ File A LẪN File B và xác định được:
+  + File A truyền sai dữ liệu/gọi sai API? -> Lỗi tại File A.
+  + Hay File B cài đặt sai logic/sai kiểu dữ liệu trả về/thiếu method? -> Lỗi gốc tại File B.
+### NGHIÊM CẤM:
+- Đọc cùng 1 file nhiều lần.
+- Dùng search file nhiều lần
+"""
+
+
+        messages: List[Dict[str, Any]] = [
+            {"role": "system", "content": investigate_prompt},
+            {
+                "role": "user", 
+                "content": "Hãy đọc code của các file nghi vấn ({suspect_files}) bằng `read_file` ngay lập tức để xác minh lỗi."
+            }
+        ]
+
+        investigation_notes = []
+        
+        # Theo dõi tập hợp các tool call đã thực thi trong toàn bộ phiên hội thoại để chống gọi lặp lại
+        executed_tool_calls: Set[Tuple[str, str]] = set()
+
+        for iteration in range(self.max_tool_iterations):
+            try:
+                response = self.client.chat.completions.create(
+                    model=self.model_name,
+                    messages=messages,
+                    tools=openai_tools if openai_tools else None,
+                    tool_choice="auto" if openai_tools else None,
+                    temperature=self.temperature
+                )
+            except Exception as e:
+                print(f"⚠️ [Reviewer] Lỗi gọi API ở pha điều tra: {e}")
+                break
+
+            response_msg = response.choices[0].message
+            tool_calls = getattr(response_msg, "tool_calls", None)
+            content = response_msg.content or ""
+
+            # Bắt trường hợp tool_calls native
+            if tool_calls:
+                messages.append(response_msg.model_dump() if hasattr(response_msg, "model_dump") else {
+                    "role": "assistant",
+                    "content": content,
+                    "tool_calls": [
+                        {
+                            "id": tc.id,
+                            "type": "function",
+                            "function": {"name": tc.function.name, "arguments": tc.function.arguments}
+                        } for tc in tool_calls
+                    ]
+                })
+
+                for tc in tool_calls:
+                    call_id = tc.id
+                    func_name = tc.function.name
+                    try:
+                        args = json.loads(tc.function.arguments) if isinstance(tc.function.arguments, str) else tc.function.arguments
+                    except Exception:
+                        args = tc.function.arguments
+
+                    call_signature = (func_name, self._normalize_tool_args(args))
+
+                    # Kiểm tra xem tool và tham số này đã từng được gọi trong phiên hội thoại chưa
+                    if call_signature in executed_tool_calls:
+                        print(f"⚠️ [Reviewer] Phát hiện gọi lặp tool/tham số đã từng gọi trong phiên: {func_name}({args}). Hủy thực thi.")
+                        tool_output = "Lỗi: Bạn đã từng gọi tool này với cùng tham số trước đó trong phiên hội thoại. Hành động này bị hủy để tránh lặp. Hãy chuyển sang file khác hoặc kết luận 'ĐÃ ĐỦ THÔNG TIN'."
+                    else:
+                        executed_tool_calls.add(call_signature)
+                        tool_output = self._execute_tool(tools_map, func_name, args)
+                        print(f"🛠️ [Reviewer Tool] {func_name}({args}) -> Kích thước: {len(tool_output)} ký tự")
+                        investigation_notes.append(f"File/Tool {func_name}({args}):\n{tool_output}\n")
+
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": call_id,
+                        "content": str(tool_output)
+                    })
+                continue
+
+            # Bắt trường hợp model in text tool call (dự phòng)
+            text_tool = self._detect_text_tool_call(content, tools_map)
+            if text_tool:
+                func_name, args = text_tool
+                call_signature = (func_name, self._normalize_tool_args(args))
+
+                messages.append({"role": "assistant", "content": content})
+
+                # Kiểm tra lặp trong phiên hội thoại
+                if call_signature in executed_tool_calls:
+                    print(f"⚠️ [Reviewer] Phát hiện text-tool gọi lặp lại trong phiên: {call_signature}. Hủy thực thi.")
+                    messages.append({
+                        "role": "user",
+                        "content": f"[TOOL RESULT]: Lỗi: Bạn đã gọi tool '{func_name}' với cùng tham số trước đó trong phiên hội thoại. Hành động này bị hủy. Vui lòng chuyển sang kiểm tra file khác hoặc kết luận 'ĐÃ ĐỦ THÔNG TIN'."
+                    })
+                    continue
+
+                executed_tool_calls.add(call_signature)
+                tool_output = self._execute_tool(tools_map, func_name, args)
+                print(f"🛠️ [Reviewer Text-Tool] {func_name}({args}) -> Kích thước: {len(tool_output)} ký tự")
+                investigation_notes.append(f"File/Tool {func_name}({args}):\n{tool_output}\n")
+
+                messages.append({
+                    "role": "user",
+                    "content": f"[TOOL RESULT]:\n{tool_output}\n\nHãy tiếp tục dùng tool đọc thêm nếu cần, hoặc trả lời 'ĐÃ ĐỦ THÔNG TIN'."
+                })
+                continue
+
+            # Nếu model không gọi tool nữa hoặc báo đã đủ thông tin
+            print(f"✅ [Reviewer] Quá trình thu thập mã nguồn hoàn tất.")
+            break
         code_overview = ""
         for filepath, content in files_dict.items():
             code_overview += f"\n--- FILE: `{filepath}` ---\n```{plan.target_language}\n{content}\n```\n"
+        # =====================================================================
+        # PHA 2: RA PHÁN QUYẾT & XUẤT JSON (KHÔNG DÙNG TOOLS)
+        # =====================================================================
+        gathered_context = "\n---\n".join(investigation_notes) if investigation_notes else "Không có file nào được đọc thêm."
 
-        prompt = f"""BẠN LÀ META-LOGIC AUDITOR & ROOT-CAUSE SYSTEM ANALYZER.
-Nhiệm vụ: Phân tích sự cố thực thi Sandbox, đối chiếu toàn bộ mã nguồn đa tệp và yêu cầu bài toán,
-sau đó PHÁN QUYẾT CHÍNH XÁC AI LÀ NGƯỜI SAI (PLANNER, CODER, hay TESTER).
+        verdict_prompt = f"""BẠN LÀ THẨM PHÁN TỐI CAO (CODE AUDITOR).
+Đã có điều tra viên thu thập thông tin về mã nguồn bị lỗi, hãy sử dụng các thông tin sau để đưa ra phán quyết cuối cùng:
 
-### [1. YÊU CẦU BÀI TOÁN GỐC (SPECIFICATION)]:
+### YÊU CẦU BÀI TOÁN GỐC (SPECIFICATION - CHÂN LÝ TỐI CAO):
 {task_goal}
 
-### [2. PLAN HIỆN TẠI (PLANNER)]:
+### [PLAN HIỆN TẠI (PLANNER)]:
 Kiến trúc: {plan.architecture_pattern}
-Các tệp: {[f.filepath for f in plan.files]}
+Các tệp theo thiết kế: {[f.filepath for f in plan.files]}
 
-### [3. TOÀN BỘ MÃ NGUỒN CÁC TỆP (CODER)]:
-{code_overview}
+### LOG LỖI SANDBOX:
+{error_msg}
 
-### [4. KỊCH BẢN KIỂM THỬ (TESTER)]:
-```{plan.target_language}
+### KỊCH BẢN TESTCASE (TEST HARNESS):
 {test_cases}
-```
 
-### [5. NHẬT KÝ LỖI SANDBOX THỰC TẾ]:
-{error_msg if error_msg else "Mã nguồn thực thi thành công, không có lỗi runtime."}
+### MÃ NGUỒN MÀ ĐIỀU TRA VIÊN THU THẬP (CODE INVESTIGATION NOTES):
+{gathered_context if gathered_context else code_overview}
 
 ### QUY TRÌNH THẨM ĐỊNH VÀ NGUYÊN TẮC PHÂN ĐỊNH TRÁCH NHIỆM:
 Danh sách file trách nhiệm sửa lỗi:
  + Tester: file test_harness.py, test_harness.java, test_harness.c
  + Coder và Planner: tất cả các file còn lại trong project.
 
-BƯỚC 1: QUY TRÌNH XÁC ĐỊNH NGUYÊN NHÂN CỐT LÕI (ROOT CAUSE ANALYSIS):
-1. TRUY VẾT LỖI TỪ STACK TRACE / LOG:
-   - Xác định loại lỗi trước: lỗi khởi tạo/import, compile/syntax, exception runtime, assertion failure, hay lỗi môi trường.
-   - Với stack trace, phân biệt (a) nơi testcase gọi vào chương trình, (b) nơi exception thực sự phát sinh, và (c) các frame trung gian. Frame của test chỉ là điểm gọi, không tự động là nơi gây lỗi.
-   - Dùng frame ứng dụng sâu nhất có liên quan đến exception làm vị trí phát sinh; bỏ qua frame thư viện/runtime nếu chúng không phải nguyên nhân. Với lỗi assertion hoặc API sai trong test harness, kiểm tra chính dòng test gây lỗi.
-   - Trích xuất filepath, line number, class/method/symbol và loại lỗi chính xác. Không gọi lỗi runtime là lỗi compile.
-   - Nếu log có nhiều test lỗi, phân tích từng lỗi riêng và không gộp các lỗi khác nguyên nhân thành một kết luận.
-2. PHÂN TÍCH LUỒNG TRUY CẬP LỖI (DATAFLOW & CALL CHAIN):
-   - Không kết luận root cause chỉ từ file đầu/cuối của traceback. Đối chiếu dòng lỗi với nội dung thực tế của source, test, plan và specification.
-   - Truy ngược giá trị/API gây lỗi đến nơi tạo ra hoặc định nghĩa sai. Nếu source vi phạm contract hoặc có lỗi nội bộ, root cause thuộc file nguồn đó dù testcase kích hoạt lỗi. Nếu source tuân thủ contract nhưng testcase gọi API sai hoặc đặt kỳ vọng không có căn cứ, root cause thuộc testcase.
-   - Với tên chưa định nghĩa/import thiếu, xác định file đang dùng tên đó và kiểm tra import/định nghĩa ngay tại file đó; không quy lỗi cho file chỉ vì file đó định nghĩa symbol được nhắc đến.
-   - Phân biệt bằng chứng trực tiếp với giả thuyết. Không khẳng định dataflow, contract hoặc nguyên nhân không thể chứng minh từ ngữ cảnh đã cung cấp.
-3. XÁC ĐỊNH DANH SÁCH FILE LỖI (`failed_files`):
-   - Chỉ liệt kê file chứa root cause cần sửa; không liệt kê file chỉ gọi hàm, xuất hiện trong stack trace hoặc được nhắc trong phần giải thích.
-   - Chỉ dùng đường dẫn chính xác tồn tại trong project hoặc testcase được cung cấp. Nếu chưa xác định được file gốc từ bằng chứng thì để danh sách rỗng, không đoán file.
-
-BƯỚC 1B: ĐỀ XUẤT CÁCH SỬA CÓ THỂ THỰC THI:
-1. Đối chiếu root cause với code hiện tại, API/signature thực tế, plan và specification trước khi đề xuất thay đổi.
-2. Chỉ dẫn sửa phải cụ thể: nêu file cần sửa, lỗi cần xử lý và thay đổi tối thiểu đủ khắc phục root cause. Đảm bảo thay đổi phù hợp với ngôn ngữ và kiểu đối tượng thực tế.
-3. Không đề xuất gọi method/field/import/constructor chưa tồn tại hoặc không phù hợp với kiểu đối tượng. Không đưa ra hướng dẫn chung chung, lặp lại chính dòng gây lỗi, hay chỉ thị không làm thay đổi nguyên nhân.
-4. Trước khi trả kết quả, tự kiểm tra: nếu làm đúng instructions thì lỗi trong log có được loại bỏ không, và thay đổi có tạo lỗi mới hoặc vi phạm specification không? Nếu không thể xác minh, nêu giới hạn thay vì đoán.
-5. Ưu tiên sửa file có khả năng giảm lỗi nhiều nhất và chỉ liệt kê file thực sự cần thay đổi. Nếu log có nhiều root cause độc lập, ghi rõ chúng và cách sửa tương ứng trong instructions, đồng thời chọn target cần xử lý ở vòng hiện tại.
+### QUY TẮC BẮT BUỘC ĐỂ TRÁNH SUY DIỄN SAI:
+BƯỚC 1: Dựa vào log lỗi xác định nguyên nhân chính
 
 BƯỚC 2: CÂY QUYẾT ĐỊNH PHÂN ĐỊNH TRÁCH NHIỆM (CHỌN DUY NHẤT 1 TARGET):
 
@@ -100,10 +391,10 @@ BƯỚC 2: CÂY QUYẾT ĐỊNH PHÂN ĐỊNH TRÁCH NHIỆM (CHỌN DUY NHẤT 
      + **PLANNER (GLOBAL)**: Plan thiếu, sai, lệch class, method, interface giữa các file trong plan. 
      + **CODER (LOCAL)**: Plan đúng, có đề cập nhưng Coder không triển khai đúng, thiếu những gì plan đề cập, sai cú pháp, sai logic thân hàm.
 
-2. LỖI BIÊN DỊCH / KHÔNG TÌM THẤY KÝ HIỆU TẠI TỆP KIỂM THỬ (TEST HARNESS):
-   (Áp dụng khi log lỗi biên dịch/import chỉ ra vị trí đứt gãy xuất hiện, nằm trong file TestHarness)
-
-   👉 BẮT BUỘC LẤY SPECIFICATION LÀM CHÂN LÝ ĐỂ ĐỐI CHIẾU:
+2. LỖI BIÊN DỊCH / KHÔNG TÌM THẤY KÝ HIỆU TẠI TỆP KIỂM THỬ (TEST HARNESS) (ví dụ: `TestHarness.java:8: error: cannot find symbol`, `testharness.c...`, `testharness.py...`)::
+   (Áp dụng khi log lỗi biên dịch/import chỉ ra vị trí đứt gãy xuất hiện, nằm trong file TestHarness) (TUYỆT ĐỐI KHÔNG CHỌN PLANNER)
+   
+   BẮT BUỘC LẤY SPECIFICATION LÀM CHÂN LÝ ĐỂ ĐỐI CHIẾU:
    Trích xuất đúng Class / Method / Field / Signature đang bị báo lỗi trong TestHarness và so sánh với [1. YÊU CẦU BÀI TOÁN GỐC (SPECIFICATION)]:
 
    + TRƯỜNG HỢP 2.1 - CODER SAI (CODER / LOCAL):
@@ -122,6 +413,10 @@ BƯỚC 2: CÂY QUYẾT ĐỊNH PHÂN ĐỊNH TRÁCH NHIỆM (CHỌN DUY NHẤT 
      + Nếu Coder tính toán sai thuật toán hoặc không đáp ứng đúng yêu cầu đề bài -> Chọn **CODER (LOCAL)**.
      + Nếu Coder đã làm đúng yêu cầu đề bài nhưng Testcase, assertion của file test kiểm tra điều kiện vô lý hoặc sai giá trị kỳ vọng -> Chọn **TESTER (TESTCASE)**.
 
+BƯỚC 3: HƯỚNG DẪN SỬA (instructions):
+   - Phải nêu rõ: sửa file nào, dòng/hàm nào, thay bằng cú pháp gì.
+   - Hướng dẫn phải sửa đúng Root Cause, không đưa ra lời khuyên chung chung.
+
 ### ĐỊNH DẠNG TRẢ VỀ:
 Trả về DUY NHẤT một JSON Object hợp lệ:
 {{
@@ -134,10 +429,12 @@ Trả về DUY NHẤT một JSON Object hợp lệ:
 "audit_table": "tóm tắt đối chiếu"
 }}
 """
+        print(f"⚖️ [Reviewer] Đang tổng hợp phán quyết cuối cùng...")
+        raw_resp = self.call_llm(verdict_prompt, format_json=True)
+        print(f"DEBUG FINAL VERDICT JSON:\n{raw_resp}\n" + "="*50)
 
-        raw_resp = self.call_llm(prompt, format_json=True)
+        # Parse kết quả JSON ra ReviewDecision
         json_obj = self.extract_json_object(raw_resp)
-
         if json_obj and "target" in json_obj:
             try:
                 target_str = str(json_obj.get("target", "UNKNOWN")).upper().strip()
@@ -155,26 +452,20 @@ Trả về DUY NHẤT một JSON Object hợp lệ:
                     cat = "LOCAL"
 
                 raw_audit = json_obj.get("audit_table", "")
-                if isinstance(raw_audit, (dict, list)):
-                    audit_table_val = json.dumps(raw_audit, ensure_ascii=False, indent=2)
-                else:
-                    audit_table_val = str(raw_audit) if raw_audit is not None else ""
+                audit_table_val = json.dumps(raw_audit, ensure_ascii=False, indent=2) if isinstance(raw_audit, (dict, list)) else str(raw_audit or "")
 
-                # Chuẩn hóa danh sách failed_files từ JSON
                 raw_failed_files = json_obj.get("failed_files")
                 if raw_failed_files is None and json_obj.get("failed_file"):
                     raw_failed_files = [json_obj.get("failed_file")]
-                    
+
                 failed_files_list: List[str] = []
                 if isinstance(raw_failed_files, list):
                     failed_files_list = [str(f).strip().strip("`'\"") for f in raw_failed_files if f]
                 elif isinstance(raw_failed_files, str):
                     failed_files_list = [f.strip().strip("`'\"") for f in raw_failed_files.split(",") if f.strip()]
 
-                # Lọc danh sách tệp thực tế trong project để chống hallucination
                 valid_failed_files = [f for f in failed_files_list if f in files_dict]
 
-                # Tạo kwargs tương thích dù Schema có failed_files hay failed_file
                 decision_kwargs = {
                     "status": str(json_obj.get("status", "REJECTED")),
                     "target": target_enum,
@@ -184,7 +475,6 @@ Trả về DUY NHẤT một JSON Object hợp lệ:
                     "audit_table": audit_table_val
                 }
 
-                # Kiểm tra thuộc tính schema để tránh ValidationError
                 schema_fields = getattr(ReviewDecision, "__fields__", {}) or getattr(ReviewDecision, "__annotations__", {})
                 if "failed_files" in schema_fields:
                     decision_kwargs["failed_files"] = valid_failed_files
@@ -196,97 +486,6 @@ Trả về DUY NHẤT một JSON Object hợp lệ:
                 return decision
 
             except Exception as e:
-                print(f"⚠️ [Reviewer] Lỗi cấu trúc JSON sang ReviewDecision: {e}")
+                print(f"⚠️ [Reviewer] Lỗi parse sang ReviewDecision: {e}")
 
-        # Fallback regex parsing nếu JSON bị lỗi hoàn toàn
         return self._fallback_parse_decision(raw_resp, error_msg, files_dict)
-
-    def _fallback_parse_decision(
-        self, 
-        text: str, 
-        error_msg: str, 
-        files_dict: Dict[str, str]
-    ) -> ReviewDecision:
-        """
-        Bảo hiểm bóc tách dữ liệu bằng Regex khi LLM không trả về đúng cú pháp JSON.
-        """
-        target_enum = ReviewTarget.CODER
-        category = "LOCAL"
-
-        text_upper = text.upper()
-        if "TARGET: PLANNER" in text_upper or '"PLANNER"' in text_upper or "GLOBAL" in text_upper:
-            target_enum = ReviewTarget.PLANNER
-            category = "GLOBAL"
-        elif "TARGET: TESTER" in text_upper or '"TESTER"' in text_upper or "TESTCASE" in text_upper:
-            target_enum = ReviewTarget.TESTER
-            category = "TESTCASE"
-        elif "PASSED" in text_upper and not error_msg:
-            target_enum = ReviewTarget.PASSED
-            category = "NONE"
-
-        # Trích xuất danh sách failed_files từ text
-        failed_files: List[str] = []
-        ff_json = re.search(r'"failed_files"\s*:\s*\[(.*?)\]', text, re.DOTALL)
-        if ff_json:
-            raw_list = ff_json.group(1)
-            extracted = [re.sub(r'["\s\']', '', f) for f in raw_list.split(",") if f.strip()]
-            failed_files = [f for f in extracted if f in files_dict]
-        else:
-            ff_single = re.search(r'"failed_file"\s*:\s*"((?:[^"\\]|\\.)*)"', text)
-            if ff_single:
-                fp = ff_single.group(1).strip()
-                if fp in files_dict:
-                    failed_files = [fp]
-
-        # Trích xuất root_cause
-        root_cause = ""
-        rc_json = re.search(r'"root_cause"\s*:\s*"((?:[^"\\]|\\.)*)"', text)
-        if rc_json:
-            root_cause = rc_json.group(1).encode('utf-8').decode('unicode-escape', errors='ignore').strip()
-        else:
-            rc_match = re.search(r"ROOT_CAUSE:?\s*(.*?)(?=\n[A-Z_]+:|$)", text, re.IGNORECASE | re.DOTALL)
-            if rc_match:
-                root_cause = rc_match.group(1).strip()
-
-        if not root_cause:
-            if error_msg:
-                lines = [l.strip() for l in error_msg.splitlines() if l.strip()]
-                root_cause = lines[-1] if lines else "Lỗi thực thi sandbox."
-            else:
-                root_cause = "Không thể phân tích chi tiết lỗi."
-
-        root_cause = re.sub(r'^[\s":*]+', '', root_cause).strip()
-
-        # Trích xuất instructions
-        instructions = ""
-        ins_json = re.search(r'"instructions"\s*:\s*"((?:[^"\\]|\\.)*)"', text)
-        if ins_json:
-            instructions = ins_json.group(1).encode('utf-8').decode('unicode-escape', errors='ignore').strip()
-        else:
-            ins_match = re.search(r"INSTRUCTION[S]?:?\s*(.*?)(?=\n[A-Z_]+:|$)", text, re.IGNORECASE | re.DOTALL)
-            if ins_match:
-                instructions = ins_match.group(1).strip()
-
-        if not instructions:
-            instructions = "Vui lòng đối chiếu log lỗi và sửa đổi mã nguồn tương ứng."
-
-        instructions = re.sub(r'^[\s":*]+', '', instructions).strip()
-
-        decision_kwargs = {
-            "status": "PASSED" if target_enum == ReviewTarget.PASSED else "REJECTED",
-            "target": target_enum,
-            "error_category": category,
-            "root_cause": root_cause,
-            "instructions": instructions,
-            "audit_table": ""
-        }
-
-        schema_fields = getattr(ReviewDecision, "__fields__", {}) or getattr(ReviewDecision, "__annotations__", {})
-        if "failed_files" in schema_fields:
-            decision_kwargs["failed_files"] = failed_files
-        if "failed_file" in schema_fields:
-            decision_kwargs["failed_file"] = failed_files[0] if failed_files else None
-
-        decision = ReviewDecision(**decision_kwargs)
-        setattr(decision, "failed_files", failed_files)
-        return decision

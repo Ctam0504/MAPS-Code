@@ -1,0 +1,14 @@
+[
+  {
+    "id": "Q001",
+    "source_file": "sample_questions.json",
+    "question": "Trong thư mục python, PaymentProcessor được khởi tạo và nhận đối tượng gì? Phương thức execute hoạt động ra sao?",
+    "answer": "Dựa trên mã nguồn đã đọc, chúng ta có thể trả lời câu hỏi của bạn như sau:\n\n1. `PaymentProcessor` được khởi tạo trong file `python\\main.py` tại dòng 9:\n   ```python\n   processor = PaymentProcessor(CreditCardStrategy())\n   ```\n  Ở đây, `PaymentProcessor` được khởi tạo với một đối tượng `CreditCardStrategy` như tham số truyền vào.\n\n2. Phương thức `execute` được định nghĩa trong file `python\\services\\payment_processor.py` tại dòng 11:\n   ```python\n   def execute(self, request: PaymentRequest) -> bool:\n   ```\n   Phương thức này nhận một đối tượng `PaymentRequest` làm tham số và trả về một giá trị boolean.\n\n   Trong phương thức `execute`, nó gọi phương thức `pay` của đối tượng `strategy` (được truyền vào khi khởi tạo `PaymentProcessor`) và trả về kết quả của phương thức đó:\n   ```python\n   return self.strategy.pay(request)\n   ```\n\nTóm lại, `PaymentProcessor` được khởi tạo với một đối tượng `CreditCardStrategy`, và phương thức `execute` gọi phương thức `pay` của đối tượng `strategy` để thực hiện thanh toán."
+  },
+  {
+    "id": "Q002",
+    "source_file": "sample_questions.json",
+    "question": "Trong thư mục C, các chiến lược thanh toán (payment strategy) nào được định nghĩa trong src và include?",
+    "answer": "Dựa trên kết quả đọc mã nguồn từ công cụ `read_file`, chúng ta có thể thấy rằng các chiến lược thanh toán được định nghĩa trong các file sau:\n\n1. `D:\\Thesis\\search_read\\C\\include\\payment_strategy.h`\n2. `D:\\Thesis\\search_read\\C\\src\\credit_card_strategy.c`\n3. `D:\\Thesis\\search_read\\C\\src\\paypal_strategy.c`\n\nCác chiến lược thanh toán được định nghĩa trong các struct và hàm cụ thể, tuân theo interface `PaymentStrategy`. Mỗi hàm cài đặt phương thức `pay` để xử lý thanh toán theo cách riêng.\n\n1. `D:\\Thesis\\search_read\\C\\include\\payment_strategy.h#L7-L10`\n   - `typedef struct PaymentStrategy {\n     const char* name;\n     int (*pay)(const PaymentRequest* request, GatewayError* error);\n   } PaymentStrategy;`\n\n2. `D:\\Thesis\\search_read\\C\\src\\credit_card_strategy.c#L5-L14`\n   - `int credit_card_pay(const PaymentRequest* request, GatewayError* error) { ... }`\n   - `PaymentStrategy create_credit_card_strategy() { ... }`\n\n3. `D:\\Thesis\\search_read\\C\\src\\paypal_strategy.c#L5-L14`\n   - `int paypal_pay(const PaymentRequest* request, GatewayError* error) { ... }`\n   - `PaymentStrategy create_paypal_strategy() { ... }`\n\nCác chiến lược thanh toán được định nghĩa trong các struct và hàm cụ thể, tuân theo interface `PaymentStrategy`. Mỗi hàm cài đặt phương thức `pay` để xử lý thanh toán theo cách riêng.\n\nKết luận: Trong thư mục C của workspace, có hai chiến lược thanh toán được định nghĩa: `credit_card_pay` và `paypal_pay`."
+  }
+]

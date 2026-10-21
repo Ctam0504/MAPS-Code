@@ -337,7 +337,8 @@ class MultiAgentCoordinator:
                 plan=self.current_plan,
                 files_dict=self.current_files,
                 test_cases=self.current_tests,
-                error_msg=err_details
+                error_msg=err_details,
+                workspace_dir=self.output_dir
             )
 
             print(f"   -> Đối tượng sai: {decision.target.value} (Phân loại: {decision.error_category})")

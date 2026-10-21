@@ -1,0 +1,24 @@
+src\Main.java:27: error: exception EventProcessingException is never thrown in body of corresponding try statement
+        } catch (EventProcessingException e) {
+          ^
+src\bus\EventBus.java:27: error: cannot find symbol
+            } catch (EventProcessingException e) {
+                     ^
+  symbol:   class EventProcessingException
+  location: class EventBus
+src\listener\NotificationListener.java:9: error: cannot find symbol
+        Order order = event.getOrder();
+        ^
+  symbol:   class Order
+  location: class NotificationListener
+src\service\OrderService.java:22: error: incompatible types: long cannot be converted to String
+        eventBus.publishEvent(new OrderEvent(System.currentTimeMillis(), order, OrderStatus.PENDING));
+                                                                     ^
+src\service\OrderService.java:29: error: incompatible types: long cannot be converted to String
+            eventBus.publishEvent(new OrderEvent(System.currentTimeMillis(), order, OrderStatus.PAID));
+                                                                         ^
+src\service\OrderService.java:32: error: incompatible types: long cannot be converted to String
+            eventBus.publishEvent(new OrderEvent(System.currentTimeMillis(), order, OrderStatus.CANCELLED));
+                                                                         ^
+Note: Some messages have been simplified; recompile with -Xdiags:verbose to get full output
+6 errors...
