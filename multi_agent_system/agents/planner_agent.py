@@ -36,7 +36,7 @@ class PlannerAgent(BaseAgent):
         lang_lower = lang.lower()
         if lang_lower == "java":
             return """
-QUY TẮC BẮT BUỘC DÀNH CHO JAVA:
+QUY TẮC BẮT BUỘC DÀNH CHO JAVA (Pure JDK):
 1. Mọi `filepath` phải có đuôi `.java` và tuân thủ chuẩn cấu trúc package (ví dụ: `models/User.java`, `services/UserService.java`).
 2. Tên Class PHẢI TRÙNG KHỚP 100% với tên file `.java` (ví dụ: `public class User` trong `User.java`).
 3. Khai báo `package` ở đầu mỗi file phù hợp với đường dẫn thư mục.
@@ -243,7 +243,7 @@ Trả về DUY NHẤT một JSON Object tuyệt đối hợp lệ theo cấu tr�
       "dependencies": ["relative_path/file chính xác từ manifest, ví dụ: src/include/user.h"],
       "external_dependencies": ["tên thư viện/package bên ngoài, ví dụ: stdio.h hoặc java.util.List"],
       "purpose": "mục đích và trách nhiệm của tệp",
-      "interface_summary": "chi tiết các Class, Function signatures, Structs hoặc Headers"
+      "interface_summary": "tóm tắt Class, Function signatures, Structs hoặc Headers"
     }
   ],
   "rationale": "giải thích ngắn gọn lý do phân chia cấu trúc"
@@ -339,7 +339,7 @@ Trả về DUY NHẤT một JSON Object hợp lệ của `MultiFilePlan`:
       "dependencies": ["relative_path/file chính xác từ manifest, ví dụ: src/include/user.h"],
       "external_dependencies": ["tên thư viện/package bên ngoài, ví dụ: stdio.h hoặc java.util.List"],
       "purpose": "mục đích",
-      "interface_summary": "chi tiết interface/class/method đã sửa"
+      "interface_summary": "tóm tắt interface/class/method cần chỉnh sửa"
     }}
   ],
   "rationale": "Lý do điều chỉnh"
