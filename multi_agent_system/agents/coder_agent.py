@@ -200,7 +200,6 @@ Nhiệm vụ: Viết mã nguồn HOÀN CHỈNH cho tệp tin: `{file_spec.filepa
         self,
         filepath: str,
         current_code: str,
-        all_files: Dict[str, str],
         reviewer_instructions: str,
         error_log: str,
         target_language: str,
@@ -210,7 +209,6 @@ Nhiệm vụ: Viết mã nguồn HOÀN CHỈNH cho tệp tin: `{file_spec.filepa
         Sửa đổi mã nguồn của một tệp khi bị Reviewer báo lỗi Local.
         """
         lang_rules = self._get_language_rules(target_language)
-        other_files = [f for f in all_files.keys() if f != filepath]
 
         prompt = f"""BẠN LÀ SENIOR SOFTWARE ENGINEER CHUYÊN SỬA LỖI **{target_language.upper()}**.
 Tệp tin `{filepath}` gặp **LỖI CỤC BỘ (LOCAL ERROR)**: Lỗi cú pháp, logic tính toán bên trong hàm, hoặc runtime exception.
@@ -229,8 +227,6 @@ Tệp tin `{filepath}` gặp **LỖI CỤC BỘ (LOCAL ERROR)**: Lỗi cú pháp
 ### [CHỈ THỊ SỬA LỖI TỪ REVIEWER]:
 {reviewer_instructions}
 
-### [CÁC TỆP KHÁC TRONG DỰ ÁN]:
-{other_files}
 
 {lang_rules}
 

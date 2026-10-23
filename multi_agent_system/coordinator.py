@@ -459,7 +459,6 @@ class MultiAgentCoordinator:
                     fixed_code = self.coder.fix_file(
                         filepath=target_file,
                         current_code=old_code,
-                        all_files=coder_all_files,
                         reviewer_instructions=decision.instructions,
                         error_log=err_details,
                         target_language=lang,
