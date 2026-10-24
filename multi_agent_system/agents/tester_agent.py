@@ -61,18 +61,32 @@ public class TestHarness {
 """
         else:  # c
             return """
-ĐỊNH DẠNG TESTCASE CHO C:
-Viết một file C hoàn chỉnh có hàm `int main()` và các câu lệnh `assert(...)`.
-Ví dụ:
-#include <stdio.h>
-#include <assert.h>
-// #include các file header của dự án
+ĐỊNH DẠNG TESTCASE CHO C (MinUnit Framework - Chuẩn hóa giống JUnit/Python):
+Sử dụng framework kiểm thử `minunit.h` có sẵn trong workspace.
+1. Khai báo các test case bằng macro `MU_TEST(test_name)`.
+2. Dùng các assertion chuyên dụng:
+   - `mu_assert(condition, "error message")`: Kiểm tra điều kiện logic tổng quát.
+   - `mu_assert_int_eq(expected, actual)`: So sánh 2 số nguyên.
+   - `mu_assert_double_eq(expected, actual)`: So sánh 2 số thực.
+   - `mu_assert_string_eq(expected, actual)`: So sánh 2 chuỗi.
+3. Gom các test case vào `MU_TEST_SUITE(test_suite)` và chạy bằng `MU_RUN_TEST(test_name)`.
+4. Ở cuối file, gọi `MU_RUN_SUITE(test_suite)` để framework tự sinh hàm main và báo cáo kết quả.
+5. #include các file header cần thiết của dự án. Nếu test sử dụng hàm callback/display từ file .c mà không có trong .h, hãy khai báo forward declaration (prototype) trước suite.
 
-int main() {
-    assert(...);
-    printf("[PASS] All tests passed.\\n");
-    return 0;
+Ví dụ mẫu chuẩn:
+#include "minunit.h"
+// #include các header của dự án
+
+MU_TEST(test_sample_feature) {
+    int result = 10;
+    mu_assert_int_eq(10, result);
 }
+
+MU_TEST_SUITE(test_suite) {
+    MU_RUN_TEST(test_sample_feature);
+}
+
+MU_RUN_SUITE(test_suite)
 """
 
     def generate_tests(
@@ -182,7 +196,9 @@ CHỈ TRẢ VỀ MÃ KIỂM THỬ trong khối ```{target_language} ... ```. Kh�
             for match in re.finditer(include_pattern, clean_code):
                 inc = match.group(1)
                 # Skip if include already contains a directory separator
-                if os.path.sep in inc:
+                # FIX 3: Dung ca hai loai separator de cross-platform
+                # (os.path.sep tren Windows la backslash, nhung filepath dung forward slash)
+                if "/" in inc or chr(92) in inc:
                     continue
                 # Search for the header file in the workspace files_dict
                 matched_path = None

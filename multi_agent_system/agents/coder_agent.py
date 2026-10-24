@@ -36,10 +36,12 @@ QUY TẮC BẮT BUỘC CHO JAVA:
         elif lang_lower in ["c", "cpp"]:
             return """
 QUY TẮC BẮT BUỘC CHO C:
-1. Nếu là tệp .h, chỉ khai báo prototype của hàm, struct, typedef, enum, macro. Không triển khai logic trong .h.
-2. Nếu là tệp .c, triển khai đầy đủ logic của các hàm đã khai báo trong .h.
-3. Dùng include chuẩn xác dựa trên danh sách các tệp phụ thuộc. (Ví dụ dùng User.h trong include thì phải có `#include "include/User.h"`). TUYỆT ĐỐI KHÔNG ĐỂ THIẾU INCLUDE
-4. Triển khai đầy đủ logic, không để comment TODO hay placeholder.
+1. Tệp .h PHẢI có Include Guards đầy đủ: #ifndef FILENAME_H, #define FILENAME_H, ... #endif.
+2. ĐỊNH NGHĨA STRUCT BẮT BUỘC DÙNG TYPEDEF: Luôn viết `typedef struct Name { ... } Name;` để tránh lỗi `unknown type name` khi các file khác dùng `Name` thay vì `struct Name`.
+3. TÁCH BIỆT RÕ RÀNG KHAI BÁO VÀ TRIỂN KHAI: Tệp .h CHỈ chứa khai báo prototype của hàm (kết thúc bằng dấu chấm phẩy `;`), struct typedef, enum, macro. TUYỆT ĐỐI KHÔNG viết thân hàm (logic {...}) trong tệp .h (trừ hàm inline). Toàn bộ thân hàm phải viết trong tệp .c tương ứng.
+4. Tệp .c PHẢI #include header tương ứng, và include các header khác nếu sử dụng struct/hàm của chúng. Nếu gọi hàm từ file .c khác (như callback/display update), PHẢI khai báo forward declaration (prototype) trước khi sử dụng.
+5. Dùng include chính xác với RELATIVE PATH đầy đủ từ workspace root (ví dụ: `#include "include/.h"`).
+6. Triển khai đầy đủ 100% logic, không để comment TODO hay placeholder.
 """
         else:  # python
             return """

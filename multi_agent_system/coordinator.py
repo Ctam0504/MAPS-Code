@@ -432,7 +432,8 @@ class MultiAgentCoordinator:
                 words = set(re.findall(r'[a-zA-Z_][a-zA-Z0-9_]{3,}', text_to_search))
                 for word in words:
                     for fp, code in self.current_files.items():
-                        if fp.endswith(".c") and f"{word}(" in code:
+                        # FIX 5: Scan ca file .h de bat loi tai header (prototype sai, thieu typedef...)
+                        if (fp.endswith(".c") or fp.endswith(".h")) and f"{word}(" in code:
                             if fp not in target_files_to_fix and fp not in ["main.c"]:
                                 target_files_to_fix.append(fp)
 
