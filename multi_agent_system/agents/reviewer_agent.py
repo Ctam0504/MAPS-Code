@@ -48,27 +48,6 @@ class ReviewerAgent(BaseAgent):
             timeout=self.timeout
         )
 
-    def _extract_suspect_files_from_error(self, error_msg: str, known_files: List[str]) -> List[str]:
-        """Trích xuất tự động danh sách các file có khả năng gây lỗi từ stacktrace/error log."""
-        suspects = []
-        if not error_msg:
-            return suspects
-
-        # Quét tên file từ error log
-        pattern = r'([\w\/\.\-]+\.(?:py|java|c|cpp|h|hpp|js|ts|go|rs))(?::(\d+))?'
-        matches = re.findall(pattern, error_msg)
-
-        for match in matches:
-            filepath = match[0].strip()
-            # Khớp tương đối với known_files
-            for kf in known_files:
-                if filepath == kf or filepath.endswith("/" + kf) or kf.endswith("/" + filepath) or os.path.basename(filepath) == os.path.basename(kf):
-                    if kf not in suspects:
-                        suspects.append(kf)
-
-        # Ưu tiên các file xuất hiện trực tiếp trong plan
-        return suspects
-
     def _truncate_error_log(self, error_msg: str, max_lines: int = 60) -> str:
         """Thu gọn error log quá dài, giữ lại đầu và cuối stacktrace để tránh tràn context."""
         lines = error_msg.strip().splitlines()
@@ -230,7 +209,6 @@ class ReviewerAgent(BaseAgent):
         workspace_dir: str
     ) -> ReviewDecision:
         all_project_files = [f.filepath for f in plan.files]
-        suspect_files = self._extract_suspect_files_from_error(error_msg, all_project_files)
         clean_error_msg = self._truncate_error_log(error_msg, max_lines=50)
         # 1. Khởi tạo Tools
         ws_tools = WorkspaceTools(
@@ -240,7 +218,7 @@ class ReviewerAgent(BaseAgent):
         tools_map = {tool.name: tool for tool in ws_tools.get_tools()}
         openai_tools = WorkspaceTools.get_tool_definitions(
             workspace_dir=workspace_dir,
-            selected_tools=["read_file", "list_directory", "file_search"]
+            selected_tools=["read_file"]
         )
 
         # =====================================================================
@@ -259,29 +237,29 @@ Nhiệm vụ: Truy vết tận gốc nguyên nhân gây ra log lỗi (Root Cause
 - Ngôn ngữ dự án: {plan.target_language}
 - Kiến trúc: {plan.architecture_pattern}
 - Danh sách tất cả tệp dự án: {[f.filepath for f in plan.files]}
-- Các tệp nghi vấn trực tiếp từ Log: {suspect_files if suspect_files else "Xem log để xác định"}
 - Log lỗi Sandbox (Hỗ trợ Python Traceback, Java Javac/Stacktrace, C/C++ GCC/Clang Error):
 {clean_error_msg if clean_error_msg else "Không có log lỗi."}
-
+<instructions>
 ### QUY TRÌNH ĐIỀU TRA ĐA NGÔN NGỮ (CROSS-LANGUAGE STEP-BY-STEP):
 1. **Đọc vị Log lỗi theo ngôn ngữ:**
    - **Python:** Tìm cấu trúc `File "...", line ..., in ...` để xác định file và hàm gây lỗi.
    - **Java:** Tìm cấu trúc `path/File.java:line: error: ...` hoặc dòng `at Package.Class.Method(File.java:line)`.
    - **C/C++:** Tìm cấu trúc `path/file.c:line:col: error: ...` hoặc cảnh báo `undefined reference to...`.
 2. **Hành động ở Lượt 1:** Bắt buộc dùng ngay tool `read_file` để mở tệp xuất hiện trực tiếp trong log lỗi ở trên.
-3. **Truy vết phụ thuộc (Dependency Tracing - BẮT BUỘC):**
-   - Nếu lỗi là thiếu định nghĩa (`cannot find symbol`, `NameError`, `undefined reference`, `unreported exception`, v.v.), hãy quan sát xem lệnh gọi đó tham chiếu đến class/hàm/biến/thư viện nào.
-   - Dùng tiếp tool `read_file` để mở các file liên quan (file chứa interface, header file `.h/.hpp`, hoặc file định nghĩa class/hàm đó) trong danh sách tệp dự án.
+3. **Khoanh vùng lỗi**:
+   - Kiểm tra xem lỗi xảy ra vị trí nào trong file. Từ đó phân tích xem các các biến, hàm tại vị trí đó có gây ra lỗi hay không?
+   --> Nếu xác định là có thì read_file chứa định nghĩa hoặc lời gọi các biến hàm, đó.
+   --> Nếu xác định là không thì xem tiếp các vị trí lân cận cho đến khi xác định lỗi gây ra đó.
+</instructions>
 
-### QUY TẮC DỪNG KHẮT KHE (CHỐNG LƯỜI BIẾNG 7B):
-- **NGHIÊM CẤM** dừng lại hoặc trả về `ĐÃ ĐỦ THÔNG TIN` ngay sau khi chỉ đọc 1 file đầu tiên nếu lỗi liên quan đến sự tương tác giữa nhiều file (gọi hàm chéo, thiếu import/include, lệch interface).
+### QUY TẮC DỪNG KHẮT KHE:
 - Chỉ được phép kết luận `ĐÃ ĐỦ THÔNG TIN` khi và chỉ khi bạn đã đọc đủ:
   + Tệp chứa điểm phát sinh lỗi (Caller/Main).
   + Tệp chứa định nghĩa gốc bị thiếu hoặc gây xung đột (Callee/Dependency/Header).
 """
 
         initial_user_msg = (
-            f"Bắt đầu điều tra. Hãy dùng `read_file` để đọc chi tiết mã nguồn của các file nghi vấn {suspect_files} "
+            f"Bắt đầu điều tra. Hãy dùng `read_file` để đọc chi tiết mã nguồn của các file xuất hiện trên log lỗi "
             f"và các file dự án liên quan trong {[f.filepath for f in plan.files]} nhằm truy vết tận gốc nguyên nhân."
         )
 
@@ -381,7 +359,7 @@ Nhiệm vụ: Truy vết tận gốc nguyên nhân gây ra log lỗi (Root Cause
                 if batch_results:
                     messages.append({
                         "role": "user",
-                        "content": "\n".join(batch_results) + "\n\nHãy tiếp tục dùng tool đọc thêm nếu cần, hoặc trả lời 'ĐÃ ĐỦ THÔNG TIN'."
+                        "content": "\n".join(batch_results) + "\n\n Dựa vào nội dung đã thu thập được, <thought> suy luận xem nếu chỉnh sửa thì có giải quyết lỗi được không? Nếu được thì trả lời đã 'ĐÃ ĐỦ', không thì tiếp tục suy luận và truy vết tiếp </thought>"
                     })
                 continue
 
@@ -413,7 +391,7 @@ Nhiệm vụ: Truy vết tận gốc nguyên nhân gây ra log lỗi (Root Cause
 
 ### YÊU CẦU BÀI TOÁN GỐC (SPECIFICATION - CHÂN LÝ TỐI CAO):
 {task_goal}
-
+<context>
 ### [PLAN HIỆN TẠI (PLANNER)]:
 Kiến trúc: {plan.architecture_pattern}
 CHÚ Ý: TẤT CẢ CÁC TỆP DƯỚI ĐÂY ĐỀU ĐÃ ĐƯỢC TẠO RA VÀ ĐANG TỒN TẠI TRONG DỰ ÁN:
@@ -422,18 +400,19 @@ CHÚ Ý: TẤT CẢ CÁC TỆP DƯỚI ĐÂY ĐỀU ĐÃ ĐƯỢC TẠO RA VÀ 
 ### LOG LỖI SANDBOX:
 {error_msg}
 
-### KỊCH BẢN TESTCASE (TEST HARNESS):
+<testcase - testharness>
 {test_cases}
+</testcase - testharness>
 
-### MÃ NGUỒN TRÍCH XUẤT TỪ ĐIỀU TRA VIÊN DỰA TRÊN LOG LỖI (CODE INVESTIGATION NOTES):
+### MÃ NGUỒN XUẤT HIỆN TRÊN LOG LỖI (CODE INVESTIGATION NOTES):
 {gathered_context if gathered_context else code_overview}
 
 ### QUY TRÌNH THẨM ĐỊNH VÀ NGUYÊN TẮC PHÂN ĐỊNH TRÁCH NHIỆM:
 Danh sách file trách nhiệm sửa lỗi:
- + Tester: file test_harness.py, test_harness.java, test_harness.c
- + Coder và Planner: tất cả các file còn lại trong project.
-
-### QUY TẮC BẮT BUỘC ĐỂ TRÁNH SUY DIỄN SAI:
+- Các file test_harness.py, test_harness.java, test_harness.c --> Thuộc về Tester
+- Tất cả các file còn lại trong dự án --> Coder và Planner
+</context>
+<thought>
 BƯỚC 1: Dựa vào log lỗi xác định nguyên nhân chính
 
 BƯỚC 2: CÂY QUYẾT ĐỊNH PHÂN ĐỊNH TRÁCH NHIỆM (CHỌN DUY NHẤT 1 TARGET):
@@ -469,9 +448,8 @@ BƯỚC 2: CÂY QUYẾT ĐỊNH PHÂN ĐỊNH TRÁCH NHIỆM (CHỌN DUY NHẤT 
 BƯỚC 3: HƯỚNG DẪN SỬA (instructions):
    - Phải nêu rõ: sửa file nào, dòng/hàm nào, thay bằng cú pháp gì.
    - Hướng dẫn phải sửa đúng Root Cause, không đưa ra lời khuyên chung chung.
-
-### ĐỊNH DẠNG TRẢ VỀ:
-Trả về DUY NHẤT một JSON Object hợp lệ:
+</thought>
+<output_format>
 {{
 "status": "REJECTED",
 "target": "PLANNER" | "CODER" | "TESTER",
@@ -481,6 +459,7 @@ Trả về DUY NHẤT một JSON Object hợp lệ:
 "instructions": "cách sửa tối thiểu, cụ thể, hợp lệ với code/API thực tế; nêu file và thay đổi cần thực hiện, không đưa ra hướng dẫn chung chung",
 "audit_table": "tóm tắt đối chiếu"
 }}
+</output_format>
 """
         print(f"⚖️ [Reviewer] Đang tổng hợp phán quyết cuối cùng...")
         raw_resp = self.call_llm(verdict_prompt, format_json=True)

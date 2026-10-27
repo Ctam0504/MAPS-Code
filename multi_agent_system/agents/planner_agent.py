@@ -18,7 +18,6 @@ from ..tools.language_detector import detect_language_from_folder
 from ..rag.ast_extractor import parse_codebase_to_graph_and_chunks
 from ..rag.rag_pipeline import GraphRAGRetriever
 from .. import config
-from ..tools.draw import generate_ascii_tree
 
 class PlannerAgent(BaseAgent):
     def __init__(
@@ -58,14 +57,6 @@ QUY TẮC BẮT BUỘC DÀNH CHO PYTHON:
 3. Đảm bảo cấu trúc module rõ ràng, phân chia tầng hợp lý.
 """
 
-    async def draw_folder_structure(self, folder: Optional[str]) -> str:
-        if not folder or not os.path.exists(folder):
-            structure = "(Thư mục không tồn tại / Dự án rỗng)\n"
-        else:
-            structure = generate_ascii_tree(folder)
-
-        print(f"\n🌳 [Planner: Draw] Cây thư mục hiện tại:\n{structure}")
-        return structure
 
     async def _retrieve_graphrag_context(self, folder: Optional[str]) -> str:
         if not folder or not os.path.exists(folder):
@@ -228,10 +219,9 @@ Hãy SỬA LẠI và chỉ trả về DUY NHẤT một JSON hợp lệ tuân th�
         # 2. Phân tích ngữ cảnh
         graphrag_context = await self._retrieve_graphrag_context(input_folder)
         rag_section = f"\n### [Thông tin folder tập tin hiện tại]:\n{graphrag_context}\n" if graphrag_context else ""
-        folder_structure = f"\n### [Cây thư mục hiện tại]:\n{await self.draw_folder_structure(input_folder)}\n"
         guidelines = self._get_language_guidelines(resolved_lang)
         json_schema_desc = """
-Trả về DUY NHẤT một JSON Object tuyệt đối hợp lệ theo cấu trúc sau:
+<output_format>
 {
   "target_language": "%s",
   "architecture_pattern": "Mẫu kiến trúc sử dụng (vd: Clean Architecture, Modular)",
@@ -248,6 +238,7 @@ Trả về DUY NHẤT một JSON Object tuyệt đối hợp lệ theo cấu tr�
   ],
   "rationale": "giải thích ngắn gọn lý do phân chia cấu trúc"
 }
+</output_format>
 """ % resolved_lang
 
         prompt = f"""BẠN LÀ MỘT HỆ THỐNG SYSTEM ARCHITECT AGENT CHUYÊN NGHIỆP.
@@ -257,8 +248,6 @@ Nhiệm vụ: Phân tích yêu cầu bài toán và thiết kế cấu trúc ĐA
 {task_prompt}
 
 {rag_section}
-
-{folder_structure}
 
 ### [QUY TẮC THIẾT KẾ KIẾN TRÚC]:
 ### Nếu codebase rỗng:
@@ -298,10 +287,6 @@ Chỉ trả về JSON object thuần túy, không chèn lời mở đầu hay k�
         """
         graphrag_context = await self._retrieve_graphrag_context(current_folder)
         rag_section = f"\n### [Thông tin folder tập tin hiện tại]:\n{graphrag_context}\n" if graphrag_context else ""
-        folder_structure = (
-            f"\n### [Cây thư mục hiện tại]:\n"
-            f"{await self.draw_folder_structure(current_folder)}\n"
-        )
         guidelines = self._get_language_guidelines(current_plan.target_language)
 
         prompt = f"""BẠN LÀ SYSTEM ARCHITECT AGENT.
@@ -311,23 +296,27 @@ Yêu cầu bài toán: {task_prompt}
 {error_log}
 
 ### [CHỈ THỊ SỬA ĐỔI TỪ REVIEWER]:
-Dựa vào chỉ thị sửa đổi và nhật ký lỗi, hãy tìm ra lỗi ở đâu trong plan và chỉnh sửa lại kế hoạch kiến trúc đa tệp sao cho phù hợp với yêu cầu bài toán.
+<instructions>
 {reviewer_instructions}
+</instructions>
 
 {rag_section}
-
-{folder_structure}
 
 {guidelines}
 
 ### [NHIỆM VỤ]:
-Hãy kế thừa, tái sử dụng các tệp, class, struct, hàm và package sẵn có trong thư mục này, chuẩn hóa, sửa đổi lại tên class/hàm/interface signatures giữa các file, hoặc bổ sung/loại bỏ file cần thiết.
+<task>
+- Dựa vào thông tin folder hiện tại, log lỗi và chỉ thị sửa lỗi. Suy luận xem cách nào để sửa đổi lại tên class/hàm/interface signatures giữa các file, hoặc bổ sung/loại bỏ file cần thiết.
+- Mục tiêu là không còn log lỗi
+<task>
 ### Quy tắc sửa lỗi:
+<thought>
 - Tuân thủ yêu cầu bài toán, chỉ thị sửa lỗi và nhật ký lỗi, chỉ sửa đổi những file cần thiết, giữ nguyên các file đã đúng.
 - Nếu cần tạo file mới, hãy thêm vào danh sách `files` với `action: "CREATE"`.
 - Nếu file hiện tại cần sửa đổi, hãy đặt `action: "MODIFY"` và cập nhật `interface_summary` tương ứng.
 - Nếu file hiện tại không cần sửa đổi, hãy giữ nguyên `action: "KEEP"` và không thay đổi nội dung.
-Trả về DUY NHẤT một JSON Object hợp lệ của `MultiFilePlan`:
+</thought>
+<output_format>
 {{
   "target_language": "{current_plan.target_language}",
   "architecture_pattern": "{current_plan.architecture_pattern}",
@@ -344,6 +333,7 @@ Trả về DUY NHẤT một JSON Object hợp lệ của `MultiFilePlan`:
   ],
   "rationale": "Lý do điều chỉnh"
 }}
+</output_format>
 """
 
         # Sử dụng try-validate-retry cả trong bước refine

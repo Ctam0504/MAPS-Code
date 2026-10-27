@@ -104,7 +104,7 @@ Nhiệm vụ: Viết mã nguồn HOÀN CHỈNH cho tệp tin: `{file_spec.filepa
 
 ### [YÊU CẦU BÀI TOÁN GỐC]:
 {task_goal}
-
+<context>
 ### [THÔNG SỐ THIẾT KẾ CỦA TỆP]:
 - Đường dẫn: `{file_spec.filepath}`
 - Hành động: `{file_spec.action}`
@@ -117,15 +117,20 @@ Nhiệm vụ: Viết mã nguồn HOÀN CHỈNH cho tệp tin: `{file_spec.filepa
 {existing_files_list}
 {existing_code_section}
 {dep_context}
-{feedback_section}
 {lang_rules}
+</context>
+###CHỈ THỊ SỬA LỖI REVIEWER
+<instruction>
+{feedback_section}
+</instruction>
 
-### [YÊU CẦU ĐẦU RA NGHIÊM NGẶT]:
+<output_format>
 1. CHỈ TRẢ VỀ DUY NHẤT MÃ NGUỒN trong một khối ```{target_language} ... ```.
 2. Tuyệt đối KHÔNG giải thích dông dài bên ngoài khối code.
-3. Tái sử dụng chính xác tên Class, Struct, Hàm, Tham số từ các tệp phụ thuộc đã tạo.
+3. Dựa vào thông số thiết kế và chỉ thị sửa lỗi của reviwer --> chỉnh sửa lại phù hợp
 4. Triển khai đầy đủ 100% thân hàm, không để placeholder hay pass lửng lơ.
 5. ĐẢM BẢO IMPORT ĐẦY ĐỦ các class/struct được dùng trong file này từ các package/tệp khác.
+</output_format>
 """
 
         raw_resp = self.call_llm(prompt)
