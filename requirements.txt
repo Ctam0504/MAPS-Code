@@ -1,0 +1,12 @@
+pydantic
+openai
+networkx
+tree_sitter
+tree_sitter_python
+tree_sitter_java
+tree_sitter_c
+httpx
+chromadb
+magika
+langchain_core
+langchain_community
