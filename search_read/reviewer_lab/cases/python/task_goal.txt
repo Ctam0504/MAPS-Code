@@ -1,2 +1,0 @@
-Implement payment processor. Valid positive payments must return True. 
-Invalid amounts (<= 0) must raise GatewayException.

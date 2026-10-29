@@ -127,7 +127,7 @@ Nhiệm vụ: Viết mã nguồn HOÀN CHỈNH cho tệp tin: `{file_spec.filepa
 <output_format>
 1. CHỈ TRẢ VỀ DUY NHẤT MÃ NGUỒN trong một khối ```{target_language} ... ```.
 2. Tuyệt đối KHÔNG giải thích dông dài bên ngoài khối code.
-3. Dựa vào thông số thiết kế và chỉ thị sửa lỗi của reviwer --> chỉnh sửa lại phù hợp
+3. Dựa vào [Thông số thiết kế của tệp] và [chỉ thị sửa lỗi của reviwer] --> chỉnh sửa lại phù hợp
 4. Triển khai đầy đủ 100% thân hàm, không để placeholder hay pass lửng lơ.
 5. ĐẢM BẢO IMPORT ĐẦY ĐỦ các class/struct được dùng trong file này từ các package/tệp khác.
 </output_format>

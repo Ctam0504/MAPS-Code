@@ -1,4 +1,0 @@
-gcc -Wall -Wextra -Iinclude test_harness.c src/payment_processor.c src/credit_card_strategy.c -o test_harness
-./test_harness
-test_harness: test_harness.c:19: test_successful_payment: Assertion `processor_execute(&processor, &request, &error) == 0' failed.
-Aborted (core dumped)

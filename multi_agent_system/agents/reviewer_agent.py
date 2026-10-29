@@ -211,56 +211,56 @@ class ReviewerAgent(BaseAgent):
         all_project_files = [f.filepath for f in plan.files]
         clean_error_msg = self._truncate_error_log(error_msg, max_lines=50)
         # 1. Khởi tạo Tools
+        # 1. Khởi tạo Tools (Bao gồm read_file và search_code)
+        selected_tool_names = ["search_code", "read_file"]
         ws_tools = WorkspaceTools(
             workspace_dir=workspace_dir,
-            selected_tools=["read_file", "list_directory", "file_search"]
+            selected_tools=selected_tool_names
         )
         tools_map = {tool.name: tool for tool in ws_tools.get_tools()}
         openai_tools = WorkspaceTools.get_tool_definitions(
             workspace_dir=workspace_dir,
-            selected_tools=["read_file"]
+            selected_tools=selected_tool_names
         )
-
         # =====================================================================
         # PHA 1: ĐIỀU TRA MÃ NGUỒN (CHỈ DÙNG TOOLS)
         # =====================================================================
-        investigate_prompt = f"""Bạn là Chuyên gia Phân tích Mã nguồn Đa ngôn ngữ (Python, Java, C/C++ cấp cao).
-Nhiệm vụ: Truy vết tận gốc nguyên nhân gây ra log lỗi (Root Cause Analysis) qua các bước logic chặt chẽ.
-
-⚠️ [QUY TẮC THỰC THI BẮT BUỘC - TUYỆT ĐỐI TUÂN THỦ]:
-- NGHIÊM CẤM liệt kê danh sách file ra văn bản (plain text) hoặc viết các bước hướng dẫn ("Hãy đọc file A, file B..."). 
-- BẠN PHẢI TRỰC TIẾP KÍCH HOẠT TOOL `read_file` thông qua cơ chế gọi hàm (Tool/JSON) ngay lập tức trong lượt này. 
-- Mọi câu trả lời bằng văn bản thuần túy không kèm theo lệnh gọi tool đều là VI PHẠM và làm hệ thống sập.
+        investigate_prompt = f"""Bạn là Chuyên gia Phân tích Mã nguồn Đa ngôn ngữ (Root Cause Analyst).
+Nhiệm vụ: Truy vết nguyên nhân cốt lõi gây ra lỗi Sandbox dựa trên quy trình truy vấn hai bước chặt chẽ.
 
 ### DỮ LIỆU ĐẦU VÀO:
 - Mục tiêu bài toán: {task_goal}
 - Ngôn ngữ dự án: {plan.target_language}
 - Kiến trúc: {plan.architecture_pattern}
-- Danh sách tất cả tệp dự án: {[f.filepath for f in plan.files]}
-- Log lỗi Sandbox (Hỗ trợ Python Traceback, Java Javac/Stacktrace, C/C++ GCC/Clang Error):
+- Danh sách tệp dự án: {[f.filepath for f in plan.files]}
+- Log lỗi Sandbox:
 {clean_error_msg if clean_error_msg else "Không có log lỗi."}
-<instructions>
-### QUY TRÌNH ĐIỀU TRA ĐA NGÔN NGỮ (CROSS-LANGUAGE STEP-BY-STEP):
-1. **Đọc vị Log lỗi theo ngôn ngữ:**
-   - **Python:** Tìm cấu trúc `File "...", line ..., in ...` để xác định file và hàm gây lỗi.
-   - **Java:** Tìm cấu trúc `path/File.java:line: error: ...` hoặc dòng `at Package.Class.Method(File.java:line)`.
-   - **C/C++:** Tìm cấu trúc `path/file.c:line:col: error: ...` hoặc cảnh báo `undefined reference to...`.
-2. **Hành động ở Lượt 1:** Bắt buộc dùng ngay tool `read_file` để mở tệp xuất hiện trực tiếp trong log lỗi ở trên.
-3. **Khoanh vùng lỗi**:
-   - Kiểm tra xem lỗi xảy ra vị trí nào trong file. Từ đó phân tích xem các các biến, hàm tại vị trí đó có gây ra lỗi hay không?
-   --> Nếu xác định là có thì read_file chứa định nghĩa hoặc lời gọi các biến hàm, đó.
-   --> Nếu xác định là không thì xem tiếp các vị trí lân cận cho đến khi xác định lỗi gây ra đó.
-</instructions>
 
-### QUY TẮC DỪNG KHẮT KHE:
-- Chỉ được phép kết luận `ĐÃ ĐỦ THÔNG TIN` khi và chỉ khi bạn đã đọc đủ:
-  + Tệp chứa điểm phát sinh lỗi (Caller/Main).
-  + Tệp chứa định nghĩa gốc bị thiếu hoặc gây xung đột (Callee/Dependency/Header).
+### QUY TRÌNH ĐIỀU TRA BẮT BUỘC (INVESTIGATION WORKFLOW):
+1. **Bước 1 - Tìm kiếm từ khóa / Symbol lỗi (`search_code`):**
+   - Trích xuất tên class, tên hàm, biến hoặc biểu thức gây lỗi xuất hiện trong Log lỗi Sandbox.
+   - Dùng tool `search_code` với query là symbol đó để tìm ra danh sách tất cả các file có chứa hoặc liên quan đến symbol lỗi.
+2. **Bước 2 - Đọc chi tiết từng file liên quan (`read_file`):**
+   - Dùng tool `read_file` để kiểm tra chi tiết các file vừa tìm được (bao gồm file gọi hàm, file khai báo và file định nghĩa hàm/class).
+3. **Bước 3 - Suy luận và Kiểm tra điều kiện dừng (`<thought>`):**
+   - Sau mỗi lần nhận kết quả tệp, bạn PHẢI viết khối suy luận:
+     `<thought>
+     Suy luận xem nếu chỉnh sửa thì có giải quyết lỗi được không?
+     Nếu được thì trả lời 'ĐÃ ĐỦ', không thì tiếp tục suy luận và truy vết tiếp 
+     </thought>`
+   - Nếu đã xác định chính xác file bị lỗi và cách sửa -> Trả về `ĐÃ ĐỦ`.
+   - Nếu chưa rõ -> Tiếp tục gọi tool.
+<constrain>
+- RÀNG BUỘC TUYỆT ĐỐI: SAU KHI DÙNG `search_code`, BẮT BUỘC PHẢI DÙNG `read_file` ĐỂ ĐỌC MÃ NGUỒN CÁC TỆP TÌM ĐƯỢC.
+- NGHIÊM CẤM ĐOÁN MÒ NỘI DUNG CỦA FILE KHI CHƯA THỰC HIỆN READ FILE
+- Chỉ được đưa ra kết luận hoặc kết thúc điều tra sau khi đã đọc thực tế (`read_file`) nội dung của tệp nghi vấn gây lỗi.
+- CHỈ THỰC HIỆN QUY TRÌNH ĐIỀU TRA.
+</constrain>
 """
 
         initial_user_msg = (
-            f"Bắt đầu điều tra. Hãy dùng `read_file` để đọc chi tiết mã nguồn của các file xuất hiện trên log lỗi "
-            f"và các file dự án liên quan trong {[f.filepath for f in plan.files]} nhằm truy vết tận gốc nguyên nhân."
+            f"Bắt đầu điều tra lỗi sau:\n{clean_error_msg}\n\n"
+            f"Hãy bắt đầu bằng việc dùng tool `search_code` để tìm các symbol/từ khóa lỗi trong workspace, "
         )
 
         messages: List[Dict[str, Any]] = [
@@ -294,7 +294,8 @@ Nhiệm vụ: Truy vết tận gốc nguyên nhân gây ra log lỗi (Root Cause
             print(f"   - Tool Calls tồn tại: {bool(tool_calls)}")
             print(f"   - Raw Content trả về:\n{content if content else '[KHÔNG CÓ TEXT CONTENT]'}")
             print("-" * 60)
-
+            has_searched = any(func == "search_code" for func, _ in executed_tool_calls)
+            has_read = any(func == "read_file" for func, _ in executed_tool_calls)
             # Bắt trường hợp tool_calls native
             if tool_calls:
                 messages.append(response_msg.model_dump() if hasattr(response_msg, "model_dump") else {
@@ -322,7 +323,7 @@ Nhiệm vụ: Truy vết tận gốc nguyên nhân gây ra log lỗi (Root Cause
                     # Kiểm tra xem tool và tham số này đã từng được gọi trong phiên hội thoại chưa
                     if call_signature in executed_tool_calls:
                         print(f"⚠️ [Reviewer] Phát hiện gọi lặp tool/tham số đã từng gọi trong phiên: {func_name}({args}). Hủy thực thi.")
-                        tool_output = "Lỗi: Bạn đã từng gọi tool này với cùng tham số trước đó trong phiên hội thoại. Hành động này bị hủy để tránh lặp. Hãy chuyển sang file khác hoặc kết luận 'ĐÃ ĐỦ THÔNG TIN'."
+                        tool_output = "Lỗi: Bạn đã từng gọi tool này với cùng tham số trước đó trong phiên hội thoại. Hành động này bị hủy để tránh lặp. Hãy chuyển sang file khác hoặc kết luận 'ĐÃ ĐỦ THÔNG TIN' và dừng gọi tools."
                     else:
                         executed_tool_calls.add(call_signature)
                         tool_output = self._execute_tool(tools_map, func_name, args)
@@ -333,6 +334,20 @@ Nhiệm vụ: Truy vết tận gốc nguyên nhân gây ra log lỗi (Root Cause
                         "role": "tool",
                         "tool_call_id": call_id,
                         "content": str(tool_output)
+                    })
+                # Sau khi thực thi xong tool calls, kiểm tra xem vừa chạy xong search hay read để append hướng dẫn tiếp theo
+                updated_has_searched = any(func == "search_code" for func, _ in executed_tool_calls)
+                updated_has_read = any(func == "read_file" for func, _ in executed_tool_calls)
+
+                if updated_has_searched and not updated_has_read:
+                    messages.append({
+                        "role": "user",
+                        "content": "Bạn đã hoàn thành việc `search_code`. Theo đúng quy trình, bây giờ BẮT BUỘC phải chuyển sang Bước 2: Dùng tool `read_file` để đọc nội dung các tệp vừa tìm được, bắt đầu với tệp đầu tiên. Hãy gọi `read_file` ngay."
+                    })
+                elif updated_has_searched and updated_has_read:
+                    messages.append({
+                        "role": "user",
+                        "content": "Bạn đã thực hiện cả `search_code` và `read_file`. <thought> Hãy suy luận xem nếu thực hiện chỉnh sửa nội dung các file hiện tại thì có làm biến mất lỗi hay không? Nếu có thì trả 'ĐÃ ĐỦ', không thì tiếp tục truy vết </thought>"
                     })
                 continue
 
@@ -346,8 +361,8 @@ Nhiệm vụ: Truy vết tận gốc nguyên nhân gây ra log lỗi (Root Cause
                     call_signature = (func_name, self._normalize_tool_args(args))
 
                     if call_signature in executed_tool_calls:
-                        print(f"⚠️ [Reviewer] Phát hiện text-tool gọi lặp lại trong phiên: {call_signature}. Hủy thực thi.")
-                        batch_results.append(f"Tool {func_name}({args}): Lỗi gọi lặp lại trong cùng phiên, bị hủy.")
+                        print(f"⚠️ [Reviewer] Phát hiện text-tool gọi lặp lại: {call_signature}. Hủy thực thi.")
+                        batch_results.append(f"Tool {func_name}({args}): Lỗi gọi lặp lại, bị hủy.")
                         continue
 
                     executed_tool_calls.add(call_signature)
@@ -357,13 +372,32 @@ Nhiệm vụ: Truy vết tận gốc nguyên nhân gây ra log lỗi (Root Cause
                     batch_results.append(f"[TOOL RESULT for {func_name}({args})]:\n{tool_output}\n")
 
                 if batch_results:
+                    updated_has_searched = any(func == "search_code" for func, _ in executed_tool_calls)
+                    updated_has_read = any(func == "read_file" for func, _ in executed_tool_calls)
+
+                    next_instruction = "\n".join(batch_results) + "\n\n"
+                    if updated_has_searched and not updated_has_read:
+                        next_instruction += "Bạn vừa thực hiện xong `search_code`. Tiếp theo BẮT BUỘC phải dùng `read_file` để đọc nội dung chi tiết các tệp."
+                    else:
+                        next_instruction += "Bạn đã có kết quả tool. Hãy tiến hành suy luận hoặc tiếp tục đọc tệp nếu cần."
+
                     messages.append({
                         "role": "user",
-                        "content": "\n".join(batch_results) + "\n\n Dựa vào nội dung đã thu thập được, <thought> suy luận xem nếu chỉnh sửa thì có giải quyết lỗi được không? Nếu được thì trả lời đã 'ĐÃ ĐỦ', không thì tiếp tục suy luận và truy vết tiếp </thought>"
+                        "content": next_instruction
                     })
                 continue
 
-            # Nếu model không gọi tool nữa hoặc báo đã đủ thông tin
+            # Kiểm tra ràng buộc: Nếu đã search mà chưa read thì ép buộc read file
+            if has_searched and not has_read:
+                print("⚠️ [Reviewer] Phát hiện vi phạm: Đã `search_code` nhưng chưa `read_file`. Ép buộc LLM đọc file.")
+                messages.append({"role": "assistant", "content": content})
+                messages.append({
+                    "role": "user",
+                    "content": "RÀNG BUỘC TUYỆT ĐỐI: Bạn mới chỉ thực hiện `search_code` và chưa hề dùng `read_file`. Cấm suy luận hay kết luận lúc này. Hãy gọi tool `read_file` ngay."
+                })
+                continue
+
+            # Hoàn tất quá trình điều tra khi đã đủ các bước
             print(f"✅ [Reviewer] Quá trình thu thập mã nguồn hoàn tất.")
             break
 
