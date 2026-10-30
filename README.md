@@ -71,6 +71,9 @@ PyMultiAgent/
 ├── run_mas.py                    # Main CLI entry point
 ├── requirements.txt              # Required Python dependencies
 └── README.md
+```
+**Architect of system:**
+![Pipeline](images/pipeline.png "Pipeline of project")
 
 ⚙️ Installation
 Clone the repository:
