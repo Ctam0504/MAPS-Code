@@ -73,7 +73,7 @@ PyMultiAgent/
 └── README.md
 ```
 **Architect of system:**
-![Pipeline](images/pipeline.png "Pipeline of project")
+![Pipeline](images/Architect.png "Pipeline of project")
 
 ⚙️ Installation
 Clone the repository:
