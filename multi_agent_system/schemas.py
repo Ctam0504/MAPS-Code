@@ -118,3 +118,13 @@ class CycleLog(BaseModel):
     execution_status: ExecutionStatus
     review_target: ReviewTarget
     note: str
+    exit_code: Optional[int] = 0
+    execution_time_ms: Optional[float] = 0.0
+    stdout: Optional[str] = ""
+    stderr: Optional[str] = ""
+    error_category: Optional[str] = ""
+    root_cause: Optional[str] = ""
+    instructions: Optional[str] = ""
+    auto_fix_note: Optional[str] = ""
+    target_files_to_fix: Optional[List[str]] = None
+    adjustment_logs: Optional[List[str]] = None
