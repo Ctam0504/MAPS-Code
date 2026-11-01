@@ -19,13 +19,13 @@ import re
 from ..tools.workspace_tools import WorkspaceTools
 
 class ReviewerAgent(BaseAgent):
-    max_tool_iterations: int = 10
+    max_tool_iterations: int = 4
 
     def __init__(
         self,
         model_name: Optional[str] = None,
         base_url: Optional[str] = None,
-        max_tool_iterations: int = 10
+        max_tool_iterations: int = 4
     ):
         # 1. Gọi super().__init__ trước để khởi tạo self.base_url, self.model_name,...
         super().__init__(
@@ -210,7 +210,7 @@ class ReviewerAgent(BaseAgent):
     ) -> ReviewDecision:
         all_project_files = [f.filepath for f in plan.files]
         clean_error_msg = self._truncate_error_log(error_msg, max_lines=50)
-        # 1. Khởi tạo Tools
+        
         # 1. Khởi tạo Tools (Bao gồm read_file và search_code)
         selected_tool_names = ["search_code", "read_file"]
         ws_tools = WorkspaceTools(
@@ -222,11 +222,13 @@ class ReviewerAgent(BaseAgent):
             workspace_dir=workspace_dir,
             selected_tools=selected_tool_names
         )
+
         # =====================================================================
-        # PHA 1: ĐIỀU TRA MÃ NGUỒN (CHỈ DÙNG TOOLS)
+        # PHA 1: ĐIỀU TRA HIỆN TRƯỜNG MÃ NGUỒN (CHỈ DÙNG TOOLS - THU THẬP BẰNG CHỨNG KHÁCH QUAN)
         # =====================================================================
-        investigate_prompt = f"""Bạn là Chuyên gia Phân tích Mã nguồn Đa ngôn ngữ (Root Cause Analyst).
-Nhiệm vụ: Truy vết nguyên nhân cốt lõi gây ra lỗi Sandbox dựa trên quy trình truy vấn hai bước chặt chẽ.
+        investigate_prompt = f"""Bạn là Kỹ thuật viên Giám định Hiện trường Mã nguồn (Forensic Code Investigator).
+Nhiệm vụ DUY NHẤT: Thu thập BẰNG CHỨNG MÃ NGUỒN THỰC TẾ (FACTS / CODE SNIPPETS) tại các vị trí xảy ra lỗi để chuyển giao cho Thẩm phán (Verdict).
+TUYỆT ĐỐI KHÔNG ĐƯA RA NHẬN ĐỊNH CHỦ QUAN, KHÔNG TỰ QUY KẾT TRÁCH NHIỆM CHO BẤT KỲ AGENT NÀO (Planner/Coder/Tester).
 
 ### DỮ LIỆU ĐẦU VÀO:
 - Mục tiêu bài toán: {task_goal}
@@ -236,31 +238,34 @@ Nhiệm vụ: Truy vết nguyên nhân cốt lõi gây ra lỗi Sandbox dựa tr
 - Log lỗi Sandbox:
 {clean_error_msg if clean_error_msg else "Không có log lỗi."}
 
-### QUY TRÌNH ĐIỀU TRA BẮT BUỘC (INVESTIGATION WORKFLOW):
-1. **Bước 1 - Tìm kiếm từ khóa / Symbol lỗi (`search_code`):**
-   - Trích xuất tên class, tên hàm, biến hoặc biểu thức gây lỗi xuất hiện trong Log lỗi Sandbox.
-   - Dùng tool `search_code` với query là symbol đó để tìm ra danh sách tất cả các file có chứa hoặc liên quan đến symbol lỗi.
-2. **Bước 2 - Đọc chi tiết từng file liên quan (`read_file`):**
-   - Dùng tool `read_file` để kiểm tra chi tiết các file vừa tìm được (bao gồm file gọi hàm, file khai báo và file định nghĩa hàm/class).
-3. **Bước 3 - Suy luận và Kiểm tra điều kiện dừng (`<thought>`):**
-   - Sau mỗi lần nhận kết quả tệp, bạn PHẢI viết khối suy luận:
-     `<thought>
-     Suy luận xem nếu chỉnh sửa thì có giải quyết lỗi được không?
-     Nếu được thì trả lời 'ĐÃ ĐỦ', không thì tiếp tục suy luận và truy vết tiếp 
-     </thought>`
-   - Nếu đã xác định chính xác file bị lỗi và cách sửa -> Trả về `ĐÃ ĐỦ`.
-   - Nếu chưa rõ -> Tiếp tục gọi tool.
+### CHIẾN LƯỢC ĐIỀU TRA BẰNG CHỨNG (TỐI ĐA 2-3 BƯỚC):
+1. **Bước 1 - Khám nghiệm điểm lỗi trực tiếp (`read_file`):**
+   - Nếu Log lỗi Sandbox nêu rõ tệp và dòng cụ thể (ví dụ: `<đường_dẫn_tệp>:<số_dòng>: error...`), BẮT BUỘC dùng ngay `read_file` để kiểm tra tệp đó trước.
+   - Chỉ dùng `search_code` khi trong log xuất hiện tên symbol/hàm/class nhưng bạn CHƯA BIẾT nó được định nghĩa ở tệp nào trong dự án.
+2. **Bước 2 - Kiểm tra điểm đối ứng / Hợp đồng (`read_file`):**
+   - Nếu tệp bị lỗi đang gọi một symbol/class/hàm từ tệp khác nhưng bị báo lỗi chưa tìm thấy hoặc không tương thích, hãy dùng `read_file` đọc tệp chứa định nghĩa của symbol đó để xác minh:
+     + Khai báo thực tế (prototype, class, hàm, struct, export/import).
+     + Kiểu dữ liệu, tên symbol, chữ ký hàm thực tế có khớp với nơi gọi hay không.
+3. **Bước 3 - Kết thúc và Xuất bằng chứng khách quan (`<evidence>`):**
+   - Ngay sau khi đã đọc được nơi phát sinh lỗi và nơi định nghĩa đối ứng, DỪNG GỌI TOOL NGAY LẬP TỨC.
+   - Xuất khối bằng chứng theo định dạng chuẩn:
+     <evidence>
+     - Điểm phát sinh lỗi: [Đường dẫn tệp, số dòng và đoạn code ngắn thực tế]
+     - Điểm đối ứng/định nghĩa: [Đường dẫn tệp định nghĩa và đoạn code ngắn thực tế]
+     - Dữ kiện thực tế ghi nhận: [Liệt kê các sự thật khách quan quan sát được từ code, không suy đoán, không phán xét]
+     </evidence>
+     ĐÃ ĐỦ BẰNG CHỨNG
+
 <constrain>
-- RÀNG BUỘC TUYỆT ĐỐI: SAU KHI DÙNG `search_code`, BẮT BUỘC PHẢI DÙNG `read_file` ĐỂ ĐỌC MÃ NGUỒN CÁC TỆP TÌM ĐƯỢC.
-- NGHIÊM CẤM ĐOÁN MÒ NỘI DUNG CỦA FILE KHI CHƯA THỰC HIỆN READ FILE
-- Chỉ được đưa ra kết luận hoặc kết thúc điều tra sau khi đã đọc thực tế (`read_file`) nội dung của tệp nghi vấn gây lỗi.
-- CHỈ THỰC HIỆN QUY TRÌNH ĐIỀU TRA.
+- TIÊU CHÍ HÀNG ĐẦU: Thu thập nhanh, đúng trọng tâm. Chỉ đọc tối đa 2-3 tệp liên quan trực tiếp đến lỗi.
+- KHÔNG đọc lan man sang các tệp không xuất hiện trong log lỗi hoặc không liên quan đến symbol lỗi.
+- KHÔNG ĐƯỢC PHÁN XÉT: Không viết các câu nhận định như "Lỗi do Planner", "Coder làm sai", "Tester sai". Quyền phán quyết 100% thuộc về Thẩm phán ở pha sau.
 </constrain>
 """
 
         initial_user_msg = (
-            f"Bắt đầu điều tra lỗi sau:\n{clean_error_msg}\n\n"
-            f"Hãy bắt đầu bằng việc dùng tool `search_code` để tìm các symbol/từ khóa lỗi trong workspace, "
+            f"Bắt đầu thu thập chứng cứ cho log lỗi sau:\n{clean_error_msg}\n\n"
+            f"Hãy bắt đầu bằng cách dùng tool `read_file` để đọc ngay tệp bị báo lỗi đầu tiên trong log lỗi (hoặc `search_code` nếu chưa rõ vị trí định nghĩa symbol lỗi)."
         )
 
         messages: List[Dict[str, Any]] = [
@@ -269,6 +274,7 @@ Nhiệm vụ: Truy vết nguyên nhân cốt lõi gây ra lỗi Sandbox dựa tr
         ]
 
         investigation_notes = []
+        latest_evidence = ""
         
         # Theo dõi tập hợp các tool call đã thực thi trong toàn bộ phiên hội thoại để chống gọi lặp lại
         executed_tool_calls: Set[Tuple[str, str]] = set()
@@ -294,8 +300,23 @@ Nhiệm vụ: Truy vết nguyên nhân cốt lõi gây ra lỗi Sandbox dựa tr
             print(f"   - Tool Calls tồn tại: {bool(tool_calls)}")
             print(f"   - Raw Content trả về:\n{content if content else '[KHÔNG CÓ TEXT CONTENT]'}")
             print("-" * 60)
+
+            # Trích xuất thẻ evidence nếu có
+            evidence_match = re.search(r"<evidence>(.*?)</evidence>", content, re.DOTALL | re.IGNORECASE)
+            if evidence_match:
+                latest_evidence = evidence_match.group(1).strip()
+            elif "<evidence>" in content:
+                latest_evidence = content.split("<evidence>", 1)[1].strip()
+
             has_searched = any(func == "search_code" for func, _ in executed_tool_calls)
             has_read = any(func == "read_file" for func, _ in executed_tool_calls)
+            is_done_signaled = any(phrase in content.upper() for phrase in ["ĐÃ ĐỦ", "ĐÃ ĐỦ BẰNG CHỨNG", "ĐÃ ĐỦ THÔNG TIN"])
+
+            # Nếu model đã phát tín hiệu kết thúc sau khi đã đọc ít nhất 1 file -> Dừng ngay
+            if is_done_signaled and has_read:
+                print(f"✅ [Reviewer] Phát hiện tín hiệu dừng ('ĐÃ ĐỦ BẰNG CHỨNG') sau khi đã kiểm tra thực địa.")
+                break
+
             # Bắt trường hợp tool_calls native
             if tool_calls:
                 messages.append(response_msg.model_dump() if hasattr(response_msg, "model_dump") else {
@@ -323,7 +344,7 @@ Nhiệm vụ: Truy vết nguyên nhân cốt lõi gây ra lỗi Sandbox dựa tr
                     # Kiểm tra xem tool và tham số này đã từng được gọi trong phiên hội thoại chưa
                     if call_signature in executed_tool_calls:
                         print(f"⚠️ [Reviewer] Phát hiện gọi lặp tool/tham số đã từng gọi trong phiên: {func_name}({args}). Hủy thực thi.")
-                        tool_output = "Lỗi: Bạn đã từng gọi tool này với cùng tham số trước đó trong phiên hội thoại. Hành động này bị hủy để tránh lặp. Hãy chuyển sang file khác hoặc kết luận 'ĐÃ ĐỦ THÔNG TIN' và dừng gọi tools."
+                        tool_output = "Lỗi: Bạn đã từng gọi tool này với cùng tham số trước đó. Hãy xuất khối `<evidence>...</evidence> ĐÃ ĐỦ BẰNG CHỨNG` để kết thúc điều tra."
                     else:
                         executed_tool_calls.add(call_signature)
                         tool_output = self._execute_tool(tools_map, func_name, args)
@@ -335,19 +356,23 @@ Nhiệm vụ: Truy vết nguyên nhân cốt lõi gây ra lỗi Sandbox dựa tr
                         "tool_call_id": call_id,
                         "content": str(tool_output)
                     })
-                # Sau khi thực thi xong tool calls, kiểm tra xem vừa chạy xong search hay read để append hướng dẫn tiếp theo
+
                 updated_has_searched = any(func == "search_code" for func, _ in executed_tool_calls)
                 updated_has_read = any(func == "read_file" for func, _ in executed_tool_calls)
 
                 if updated_has_searched and not updated_has_read:
                     messages.append({
                         "role": "user",
-                        "content": "Bạn đã hoàn thành việc `search_code`. Theo đúng quy trình, bây giờ BẮT BUỘC phải chuyển sang Bước 2: Dùng tool `read_file` để đọc nội dung các tệp vừa tìm được, bắt đầu với tệp đầu tiên. Hãy gọi `read_file` ngay."
+                        "content": "Bạn đã hoàn thành `search_code`. Hãy dùng `read_file` để đọc trực tiếp tệp phát sinh lỗi hoặc tệp định nghĩa symbol liên quan."
                     })
-                elif updated_has_searched and updated_has_read:
+                elif updated_has_read:
                     messages.append({
                         "role": "user",
-                        "content": "Bạn đã thực hiện cả `search_code` và `read_file`. <thought> Hãy suy luận xem nếu thực hiện chỉnh sửa nội dung các file hiện tại thì có làm biến mất lỗi hay không? Nếu có thì trả 'ĐÃ ĐỦ', không thì tiếp tục truy vết </thought>"
+                        "content": (
+                            "Bạn đã có mã nguồn thực tế. Nếu đã đủ dữ kiện để đối chiếu nơi xảy ra lỗi và nơi định nghĩa liên quan, "
+                            "hãy xuất ngay khối `<evidence>...</evidence> ĐÃ ĐỦ BẰNG CHỨNG` và KHÔNG gọi thêm tool nào. "
+                            "Nếu còn thiếu tệp đối ứng quan trọng, hãy gọi duy nhất 1 lần `read_file` cho tệp đó."
+                        )
                     })
                 continue
 
@@ -362,13 +387,13 @@ Nhiệm vụ: Truy vết nguyên nhân cốt lõi gây ra lỗi Sandbox dựa tr
 
                     if call_signature in executed_tool_calls:
                         print(f"⚠️ [Reviewer] Phát hiện text-tool gọi lặp lại: {call_signature}. Hủy thực thi.")
-                        batch_results.append(f"Tool {func_name}({args}): Lỗi gọi lặp lại, bị hủy.")
+                        batch_results.append(f"Tool {func_name}({args}): Lỗi gọi lặp lại, đã từng thực thi. Hãy dừng gọi tool và xuất `<evidence>...</evidence> ĐÃ ĐỦ BẰNG CHỨNG`.")
                         continue
 
                     executed_tool_calls.add(call_signature)
                     tool_output = self._execute_tool(tools_map, func_name, args)
                     print(f"🛠️ [Reviewer Text-Tool] {func_name}({args}) -> Kích thước: {len(tool_output)} ký tự")
-                    investigation_notes.append(f"({args}):\n{tool_output}\n")
+                    investigation_notes.append(f"File/Tool {func_name}({args}):\n{tool_output}\n")
                     batch_results.append(f"[TOOL RESULT for {func_name}({args})]:\n{tool_output}\n")
 
                 if batch_results:
@@ -377,9 +402,17 @@ Nhiệm vụ: Truy vết nguyên nhân cốt lõi gây ra lỗi Sandbox dựa tr
 
                     next_instruction = "\n".join(batch_results) + "\n\n"
                     if updated_has_searched and not updated_has_read:
-                        next_instruction += "Bạn vừa thực hiện xong `search_code`. Tiếp theo BẮT BUỘC phải dùng `read_file` để đọc nội dung chi tiết các tệp."
+                        next_instruction += (
+                            "Bạn đã có kết quả tìm kiếm. Tiếp theo, hãy dùng `read_file` để đọc trực tiếp "
+                            "mã nguồn tại tệp phát sinh lỗi hoặc tệp định nghĩa liên quan."
+                        )
                     else:
-                        next_instruction += "Bạn đã có kết quả tool. Hãy tiến hành suy luận hoặc tiếp tục đọc tệp nếu cần."
+                        next_instruction += (
+                            "Bạn đã có mã nguồn thực tế từ công cụ. "
+                            "Nếu đã đủ dữ kiện để đối chiếu nơi xảy ra lỗi và nơi định nghĩa liên quan, "
+                            "hãy xuất ngay khối `<evidence>...</evidence> ĐÃ ĐỦ BẰNG CHỨNG` và KHÔNG gọi thêm tool nào. "
+                            "Nếu còn thiếu tệp đối ứng quan trọng, hãy gọi duy nhất 1 lần `read_file` cho tệp đó."
+                        )
 
                     messages.append({
                         "role": "user",
@@ -387,17 +420,7 @@ Nhiệm vụ: Truy vết nguyên nhân cốt lõi gây ra lỗi Sandbox dựa tr
                     })
                 continue
 
-            # Kiểm tra ràng buộc: Nếu đã search mà chưa read thì ép buộc read file
-            if has_searched and not has_read:
-                print("⚠️ [Reviewer] Phát hiện vi phạm: Đã `search_code` nhưng chưa `read_file`. Ép buộc LLM đọc file.")
-                messages.append({"role": "assistant", "content": content})
-                messages.append({
-                    "role": "user",
-                    "content": "RÀNG BUỘC TUYỆT ĐỐI: Bạn mới chỉ thực hiện `search_code` và chưa hề dùng `read_file`. Cấm suy luận hay kết luận lúc này. Hãy gọi tool `read_file` ngay."
-                })
-                continue
-
-            # Hoàn tất quá trình điều tra khi đã đủ các bước
+            # Hoàn tất quá trình điều tra khi không còn tool nào cần gọi
             print(f"✅ [Reviewer] Quá trình thu thập mã nguồn hoàn tất.")
             break
 
@@ -412,16 +435,25 @@ Nhiệm vụ: Truy vết nguyên nhân cốt lõi gây ra lỗi Sandbox dựa tr
         # =====================================================================
         # PHA 2: RA PHÁN QUYẾT & XUẤT JSON (KHÔNG DÙNG TOOLS)
         # =====================================================================
+        evidence_sections = []
+        if latest_evidence:
+            evidence_sections.append(
+                f"### [HỒ SƠ BẰNG CHỨNG HIỆN TRƯỜNG TỪ ĐIỀU TRA VIÊN (OBJECTIVE EVIDENCE)]:\n{latest_evidence}"
+            )
+
         if investigation_notes:
-            # Pha 1 đã chạy và thu thập được dữ liệu -> Chỉ dùng ghi chú điều tra
-            gathered_context = "\n---\n".join(investigation_notes)
+            evidence_sections.append(
+                f"### [MÃ NGUỒN CÁC TỆP LIÊN QUAN ĐÃ THU THẬP TỪ TOOLS]:\n" + "\n---\n".join(investigation_notes)
+            )
+
+        if evidence_sections:
+            gathered_context = "\n\n".join(evidence_sections)
         else:
-            # Pha 1 thất bại/không gọi được tool -> Fallback nạp toàn bộ mã nguồn để tránh thiếu context
             print("⚠️ [Reviewer] Pha 1 không thu thập được tool note. Fallback nạp toàn bộ code_overview.")
             gathered_context = code_overview
 
         verdict_prompt = f"""BẠN LÀ THẨM PHÁN TỐI CAO (CODE AUDITOR).
-Đã có điều tra viên thu thập thông tin về mã nguồn bị lỗi, hãy sử dụng các thông tin sau để đưa ra phán quyết cuối cùng:
+Dưới đây là hồ sơ chứng cứ do điều tra viên thu thập từ hiện trường mã nguồn. Hãy đối chiếu khách quan với Yêu cầu bài toán gốc và Plan để đưa ra phán quyết cuối cùng:
 
 ### YÊU CẦU BÀI TOÁN GỐC (SPECIFICATION - CHÂN LÝ TỐI CAO):
 {task_goal}
@@ -438,8 +470,7 @@ CHÚ Ý: TẤT CẢ CÁC TỆP DƯỚI ĐÂY ĐỀU ĐÃ ĐƯỢC TẠO RA VÀ 
 {test_cases}
 </testcase - testharness>
 
-### MÃ NGUỒN XUẤT HIỆN TRÊN LOG LỖI (CODE INVESTIGATION NOTES):
-{gathered_context if gathered_context else code_overview}
+{gathered_context}
 
 ### QUY TRÌNH THẨM ĐỊNH VÀ NGUYÊN TẮC PHÂN ĐỊNH TRÁCH NHIỆM:
 Danh sách file trách nhiệm sửa lỗi:
@@ -447,12 +478,12 @@ Danh sách file trách nhiệm sửa lỗi:
 - Tất cả các file còn lại trong dự án --> Coder và Planner
 </context>
 <thought>
-BƯỚC 1: Dựa vào log lỗi xác định nguyên nhân chính
+BƯỚC 1: Dựa vào log lỗi và hồ sơ chứng cứ xác định nguyên nhân chính
 
 BƯỚC 2: CÂY QUYẾT ĐỊNH PHÂN ĐỊNH TRÁCH NHIỆM (CHỌN DUY NHẤT 1 TARGET):
 
 1. **LỖI BIÊN DỊCH / CÚ PHÁP TẠI TỆP MÃ NGUỒN DỰ ÁN (LOẠI TRỪ TESTER):**
-   - Nếu tệp bị lỗi trong log là tệp mã nguồn của Coder/Planner (ví dụ: `services/MovieService.java:8: error: cannot find symbol`, `data/MovieRepository.java`, `Main.java`):
+   - Nếu tệp bị lỗi trong log là tệp mã nguồn dự án của Coder/Planner (ví dụ: file .c, .h, .py, .java của dự án bị lỗi cú pháp, undefined symbol, thiếu header/import):
      -> NGUYÊN TẮC CỐT LÕI: Khi mã nguồn dự án không biên dịch được. Do đó lỗi 100% thuộc về CODER hoặc PLANNER, NGHIÊM CẤM ĐỔ LỖI CHO TESTER!
    - Phân định giữa PLANNER và CODER (Căn cứ vào plan và code):
      + **PLANNER (GLOBAL)**: Plan thiếu, sai, lệch , class, method, interface, dependancies giữa các file trong plan. 
@@ -555,3 +586,35 @@ BƯỚC 3: HƯỚNG DẪN SỬA (instructions):
                 print(f"⚠️ [Reviewer] Lỗi parse sang ReviewDecision: {e}")
 
         return self._fallback_parse_decision(raw_resp, error_msg, files_dict)
+
+    def _fallback_parse_decision(
+        self,
+        raw_resp: str,
+        error_msg: str,
+        files_dict: Dict[str, str]
+    ) -> ReviewDecision:
+        """Fallback khi LLM không trả về JSON hợp lệ."""
+        print("⚠️ [Reviewer] Đang kích hoạt Fallback Parser...")
+        upper_resp = raw_resp.upper()
+        
+        target = ReviewTarget.CODER
+        category = "LOCAL"
+        if "PLANNER" in upper_resp:
+            target = ReviewTarget.PLANNER
+            category = "GLOBAL"
+        elif "TESTER" in upper_resp:
+            target = ReviewTarget.TESTER
+            category = "TESTCASE"
+
+        # Quét tệp lỗi từ files_dict
+        detected_files = [f for f in files_dict.keys() if f in raw_resp or os.path.basename(f) in raw_resp]
+
+        return ReviewDecision(
+            status="REJECTED",
+            target=target,
+            error_category=category,
+            failed_files=detected_files,
+            root_cause=f"Không thể phân tích phản hồi chi tiết từ LLM. Lỗi gốc: {error_msg[:200]}...",
+            instructions="Vui lòng đọc lại log lỗi Sandbox và khắc phục sự cố.",
+            audit_table=""
+        )
