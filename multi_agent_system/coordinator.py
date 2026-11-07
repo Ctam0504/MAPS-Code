@@ -227,7 +227,7 @@ class MultiAgentCoordinator:
             note_clean = (log.note or "").replace("\r\n", " ").replace("\n", " ")
             table_rows += (
                 f"| {log.cycle} | {log.target_language.upper()} "
-                f"| `{log.execution_status.value}` | `{log.review_target.value}` "
+                f"| `{log.execution_status.value}` | `{log.review_target.value if log.review_target else 'NOT_RUN'}` "
                 f"| `{err_cat}` | {note_clean} |\n"
             )
 
@@ -261,7 +261,7 @@ class MultiAgentCoordinator:
             if log.execution_status == ExecutionStatus.SUCCESS:
                 cycle_block += f"\n🎉 **[THÀNH CÔNG] Toàn bộ mã nguồn đã vượt qua kiểm thử tại Vòng {log.cycle}!**\n"
             else:
-                if log.review_target == ReviewTarget.UNKNOWN and "reviewer" not in self.enabled_agents:
+                if log.review_target is None:
                     cycle_block += "\n❌ **[KẾT QUẢ] Sandbox thất bại; Reviewer Agent bị tắt nên dừng workflow.**\n"
                 else:
                     cycle_block += f"""
@@ -505,7 +505,7 @@ class MultiAgentCoordinator:
                     target_language=lang,
                     plan_summary=[f.filepath for f in self.current_plan.files] if self.current_plan else [],
                     execution_status=exec_res.status,
-                    review_target=ReviewTarget.UNKNOWN,
+                    review_target=None,
                     note="Sandbox thất bại và Reviewer bị tắt theo Variant.",
                     exit_code=exec_res.exit_code,
                     execution_time_ms=exec_res.execution_time_ms,
@@ -591,65 +591,53 @@ class MultiAgentCoordinator:
             elif decision.target == ReviewTarget.CODER:
                 target_files_to_fix: List[str] = []
 
-                # (1) ƯU TIÊN 1: Lấy từ failed_files do Reviewer trả về
                 reviewer_failed_files = getattr(decision, "failed_files", []) or []
                 if not reviewer_failed_files and getattr(decision, "failed_file", None):
                     reviewer_failed_files = [decision.failed_file]
 
                 for rf in reviewer_failed_files:
-                    clean_rf = os.path.basename(str(rf).strip().strip("`'\""))
+                    normalized_rf = str(rf).strip().strip("`'\"").replace("\\", "/")
+                    if normalized_rf.startswith("./"):
+                        normalized_rf = normalized_rf[2:]
                     for fp in self.current_files.keys():
-                        if fp == rf or os.path.basename(fp) == clean_rf:
+                        normalized_fp = fp.replace("\\", "/")
+                        if normalized_fp.startswith("./"):
+                            normalized_fp = normalized_fp[2:]
+                        if normalized_fp == normalized_rf:
                             if fp not in target_files_to_fix:
                                 target_files_to_fix.append(fp)
-
-                # (2) ƯU TIÊN 2: Quét tên file xuất hiện trong root_cause & instructions của Reviewer
-                text_to_search = f"{decision.root_cause} {decision.instructions}"
-                for fp in self.current_files.keys():
-                    base_name = os.path.basename(fp)
-                    if base_name in text_to_search or fp in text_to_search:
-                        if fp not in target_files_to_fix:
-                            target_files_to_fix.append(fp)
-
-                # (3) ƯU TIÊN 3: Quét tên hàm (Function-level Trace)
-                # Nếu Reviewer nhắc tới hàm nào (vd: load_from_file), tìm xem hàm đó nằm trong file nào!
-                import re
-                words = set(re.findall(r'[a-zA-Z_][a-zA-Z0-9_]{3,}', text_to_search))
-                for word in words:
-                    for fp, code in self.current_files.items():
-                        # FIX 5: Scan ca file .h de bat loi tai header (prototype sai, thieu typedef...)
-                        if (fp.endswith(".c") or fp.endswith(".h")) and f"{word}(" in code:
-                            if fp not in target_files_to_fix and fp not in ["main.c"]:
-                                target_files_to_fix.append(fp)
-
-                # (4) FALLBACK 4: Quét compiler log trong err_details
-                if not target_files_to_fix:
-                    for fp in self.current_files.keys():
-                        base_name = os.path.basename(fp)
-                        if base_name in err_details:
-                            if fp not in target_files_to_fix:
-                                target_files_to_fix.append(fp)
-
-                # (5) FALLBACK CUỐI CÙNG: Không còn đường nào mới chọn file có chứa logic chính (không mặc định main.c)
-                if not target_files_to_fix:
-                    # Ưu tiên các file .c khác trước main.c
-                    c_files = [f for f in self.current_files.keys() if f.endswith('.c') and f != 'main.c']
-                    target_files_to_fix = [c_files[0]] if c_files else [self.current_plan.execution_order[-1]]
 
                 target_files_to_fix_list = list(target_files_to_fix)
                 print(f"   📋 [Coordinator] Danh sách tệp cần Coder sửa: {target_files_to_fix}")
+                if not target_files_to_fix:
+                    warning = (
+                        "Reviewer chỉ định CODER nhưng không trả về failed_files khớp chính xác "
+                        "với tệp nguồn hiện có; bỏ qua chỉnh sửa để tránh sửa nhầm tệp."
+                    )
+                    print(f"   ⚠️ [Coordinator] {warning}")
+                    adjustment_logs.append(warning)
 
                 for target_file in target_files_to_fix:
                     print(f"   🛠️ [Điều chỉnh] Coder Agent đang sửa lỗi trong file: `{target_file}`...")
-                    coder_all_files = self.current_files if self.enable_shared_memory else {target_file: self.current_files[target_file]}
                     old_code = self.current_files[target_file]
+                    target_spec = next(
+                        (spec for spec in self.current_plan.files if spec.filepath == target_file),
+                        None
+                    )
+                    related_files = {
+                        dependency: self.current_files[dependency]
+                        for dependency in (target_spec.dependencies if target_spec else [])
+                        if dependency in self.current_files
+                    }
                     fixed_code = self.coder.fix_file(
                         filepath=target_file,
                         current_code=old_code,
                         reviewer_instructions=decision.instructions,
                         error_log=err_details,
                         target_language=lang,
-                        task_goal=task_prompt
+                        task_goal=task_prompt,
+                        file_spec=target_spec,
+                        related_files=related_files
                     )
                     if fixed_code.strip() == old_code.strip():
                         print(f"   ⚠️ [Coder Warning] Mã nguồn tệp `{target_file}` không có sự thay đổi sau khi sửa!")

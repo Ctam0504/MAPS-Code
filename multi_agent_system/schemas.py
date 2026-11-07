@@ -93,13 +93,12 @@ class ReviewTarget(str, Enum):
     CODER = "CODER"       # Lỗi Local: cú pháp trong 1 file, lỗi logic cài đặt bên trong hàm
     TESTER = "TESTER"     # Lỗi Testcase: assertion sai so với yêu cầu, giả định sai
     PASSED = "PASSED"     # Đạt yêu cầu, không có lỗi
-    UNKNOWN = "UNKNOWN"   # Không xác định
 
 class ReviewDecision(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     status: str = Field(default="REJECTED", description="'PASSED' hoặc 'REJECTED'")
-    target: ReviewTarget = Field(..., description="Agent chịu trách nhiệm: PLANNER, CODER, TESTER")
+    target: ReviewTarget = Field(..., description="Agent chịu trách nhiệm: PLANNER, CODER hoặc TESTER")
     error_category: str = Field(default="LOCAL", description="'GLOBAL', 'LOCAL', 'TESTCASE' hoặc 'NONE'")
     failed_file: Optional[str] = Field(default=None, description="Tên file đơn lẻ có lỗi (giữ lại để tương thích)")
     failed_files: List[str] = Field(default_factory=list, description="Danh sách các file bị phát hiện lỗi")
@@ -116,7 +115,7 @@ class CycleLog(BaseModel):
     target_language: str
     plan_summary: List[str]
     execution_status: ExecutionStatus
-    review_target: ReviewTarget
+    review_target: Optional[ReviewTarget] = None
     note: str
     exit_code: Optional[int] = 0
     execution_time_ms: Optional[float] = 0.0

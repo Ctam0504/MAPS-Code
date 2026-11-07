@@ -24,7 +24,7 @@ The framework consists of distinct specialized roles collaborating through an it
 1. **Planner Agent:** Makes strategic plans and extracts relevant codebase context by leveraging GraphRAG.
 2. **Coder Agent:** Generates initial code implementations based on tasks, target languages, and execution plans.
 3. **Tester Agent:** Independently designs and generates rigorous unit test cases to verify the codebase.
-4. **Reviewer Agent:** Investigates errors using function calling and coordinates feedback allocation for iterative refinement.
+4. **Reviewer Agent:** Investigates errors using function calling and coordinates feedback allocation for iterative refinement. It loads a shared review protocol and the language skill selected by `plan.target_language`; investigation guidance is used in phase 1 and verdict rules in phase 2.
 5. **Sandbox Engine:** Safely executes and tests generated code across multiple language drivers (Python, Java, C).
 
 ---
@@ -32,7 +32,7 @@ The framework consists of distinct specialized roles collaborating through an it
 ## 📁 Repository Structure
 
 ```text
-PyMultiAgent/
+MAPS_Code/
 ├── multi_agent_system/               
 │   ├── agents/
 │   │   ├── __init__.py           # Core agent module
@@ -41,6 +41,12 @@ PyMultiAgent/
 │   │   ├── planner_agent.py      # Planning & codebase extraction using GraphRAG
 │   │   ├── reviewer_agent.py     # Error investigation & agent feedback allocation
 │   │   └── tester_agent.py       # Test case generation for code verification
+│   ├── reviewer_skills/
+│   │   ├── common/
+│   │   │   └── review_protocol.md # Shared evidence and verdict protocol
+│   │   ├── python/SKILL.md       # Python diagnostics and review rules
+│   │   ├── java/SKILL.md         # Java diagnostics and review rules
+│   │   └── c/SKILL.md            # C diagnostics and review rules
 │   ├── rag/
 │   │   ├── __init__.py           # RAG pipeline module
 │   │   ├── ast_extractor.py      # Multi-language AST parsing & extraction

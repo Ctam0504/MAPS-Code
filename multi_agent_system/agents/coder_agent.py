@@ -210,23 +210,48 @@ Nhiệm vụ: Viết mã nguồn HOÀN CHỈNH cho tệp tin: `{file_spec.filepa
         reviewer_instructions: str,
         error_log: str,
         target_language: str,
-        task_goal: str
+        task_goal: str,
+        file_spec: Optional[FileSpec] = None,
+        related_files: Optional[Dict[str, str]] = None,
     ) -> str:
         """
         Sửa đổi mã nguồn của một tệp khi bị Reviewer báo lỗi Local.
         """
         lang_rules = self._get_language_rules(target_language)
+        file_contract = ""
+        if file_spec is not None:
+            file_contract = f"""
+### [HỢP ĐỒNG PLAN CỦA TỆP ĐANG SỬA]:
+- Đường dẫn: `{file_spec.filepath}`
+- Mục đích: {file_spec.purpose}
+- Interface phải giữ: {file_spec.interface_summary}
+- Dependencies nội bộ: {file_spec.dependencies}
+- External dependencies: {file_spec.external_dependencies}
+"""
+
+        related_source_context = ""
+        if related_files:
+            related_source_context = "\n### [MÃ NGUỒN DEPENDENCY TRỰC TIẾP ĐỂ ĐỐI CHIẾU]:\n"
+            for related_path, related_code in related_files.items():
+                related_source_context += (
+                    f"\n--- FILE: `{related_path}` ---\n"
+                    f"```{target_language}\n{related_code}\n```\n"
+                )
 
         prompt = f"""BẠN LÀ SENIOR SOFTWARE ENGINEER CHUYÊN SỬA LỖI **{target_language.upper()}**.
-Tệp tin `{filepath}` gặp **LỖI CỤC BỘ (LOCAL ERROR)**: Lỗi cú pháp, logic tính toán bên trong hàm, hoặc runtime exception.
+Reviewer chỉ định sửa tệp `{filepath}`. Chỉ thay đổi tệp này; không sửa hoặc đề xuất sửa tệp khác.
 
 ### [YÊU CẦU BÀI TOÁN GỐC]:
 {task_goal}
+
+{file_contract}
 
 ### [MÃ NGUỒN HIỆN TẠI CỦA TỆP `{filepath}`]:
 ```{target_language}
 {current_code}
 ```
+
+{related_source_context}
 
 ### [NHẬT KÝ LỖI SANDBOX]:
 {error_log}
@@ -238,7 +263,11 @@ Tệp tin `{filepath}` gặp **LỖI CỤC BỘ (LOCAL ERROR)**: Lỗi cú pháp
 {lang_rules}
 
 ### [NHIỆM VỤ]:
-Viết lại mã nguồn HOÀN CHỈNH của tệp `{filepath}` đã khắc phục triệt để lỗi trên.
+Khắc phục nguyên nhân được Reviewer chỉ ra trong tệp `{filepath}` bằng thay đổi nhỏ nhất có thể.
+Giữ nguyên các class, hàm, interface và hành vi hiện có nếu chúng không liên quan đến lỗi.
+Không thêm class, hàm public, module mới hoặc thay đổi contract trừ khi Reviewer và hợp đồng Plan cung cấp căn cứ rõ ràng rằng chúng đang thiếu hoặc sai.
+Đối chiếu imports và API với các dependency được cung cấp; không suy đoán hoặc tạo thêm dependency.
+Trả về toàn bộ nội dung tệp để thay thế file hiện tại, nhưng chỉ thay đổi phần cần thiết để xử lý lỗi.
 CHỈ TRẢ VỀ DUY NHẤT MÃ NGUỒN trong khối ```{target_language} ... ```. Không giải thích gì thêm.
 """
 

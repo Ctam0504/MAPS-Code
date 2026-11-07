@@ -12,20 +12,21 @@ from pyexpat.errors import messages
 from openai import OpenAI
 import json
 from typing import Dict, Optional, Any, List, Tuple, Set
+from pathlib import Path
 from .base_agent import BaseAgent
-from ..schemas import MultiFilePlan, ReviewDecision, ReviewTarget
+from ..schemas import LanguageType, MultiFilePlan, ReviewDecision, ReviewTarget
 from .. import config
 import re
 from ..tools.workspace_tools import WorkspaceTools
 
 class ReviewerAgent(BaseAgent):
-    max_tool_iterations: int = 4
+    max_tool_iterations: int = 6
 
     def __init__(
         self,
         model_name: Optional[str] = None,
         base_url: Optional[str] = None,
-        max_tool_iterations: int = 4
+        max_tool_iterations: int = 6
     ):
         # 1. Gọi super().__init__ trước để khởi tạo self.base_url, self.model_name,...
         super().__init__(
@@ -199,6 +200,46 @@ class ReviewerAgent(BaseAgent):
             return json.dumps(args, sort_keys=True)
         return str(args)
 
+    @staticmethod
+    def _load_review_skill(target_language: str) -> Tuple[str, str, str, str]:
+        language = LanguageType.from_str(target_language).value
+        skills_dir = Path(__file__).resolve().parents[1] / "reviewer_skills"
+        common_path = skills_dir / "common" / "review_protocol.md"
+        language_path = skills_dir / language / "SKILL.md"
+
+        try:
+            common_rules = common_path.read_text(encoding="utf-8")
+            skill_content = language_path.read_text(encoding="utf-8")
+        except OSError as exc:
+            raise RuntimeError(f"Không thể nạp Reviewer skill cho ngôn ngữ '{language}': {exc}") from exc
+
+        investigation_match = re.search(
+            r"^## Phase 1: Investigation guidance\s*\n(.*?)(?=^## |\Z)",
+            skill_content,
+            re.MULTILINE | re.DOTALL
+        )
+        verdict_match = re.search(
+            r"^## Phase 2: Verdict rules\s*\n(.*?)(?=^## |\Z)",
+            skill_content,
+            re.MULTILINE | re.DOTALL
+        )
+        if investigation_match is None or verdict_match is None:
+            missing_sections = []
+            if investigation_match is None:
+                missing_sections.append("investigation")
+            if verdict_match is None:
+                missing_sections.append("verdict")
+            raise ValueError(
+                f"Reviewer skill '{language}' thiếu section bắt buộc: {', '.join(missing_sections)}."
+            )
+
+        return (
+            language,
+            common_rules.strip(),
+            investigation_match.group(1).strip(),
+            verdict_match.group(1).strip()
+        )
+
     def review(
         self,
         task_goal: str,
@@ -208,7 +249,9 @@ class ReviewerAgent(BaseAgent):
         error_msg: str,
         workspace_dir: str
     ) -> ReviewDecision:
-        all_project_files = [f.filepath for f in plan.files]
+        language, common_skill, investigation_skill, verdict_skill = self._load_review_skill(
+            plan.target_language
+        )
         clean_error_msg = self._truncate_error_log(error_msg, max_lines=50)
         
         # 1. Khởi tạo Tools (Bao gồm read_file và search_code)
@@ -232,13 +275,22 @@ TUYỆT ĐỐI KHÔNG ĐƯA RA NHẬN ĐỊNH CHỦ QUAN, KHÔNG TỰ QUY KẾT 
 
 ### DỮ LIỆU ĐẦU VÀO:
 - Mục tiêu bài toán: {task_goal}
-- Ngôn ngữ dự án: {plan.target_language}
+- Ngôn ngữ dự án: {language}
 - Kiến trúc: {plan.architecture_pattern}
 - Danh sách tệp dự án: {[f.filepath for f in plan.files]}
 - Log lỗi Sandbox:
 {clean_error_msg if clean_error_msg else "Không có log lỗi."}
+- Nội dung test harness đã được cung cấp sẵn (dùng nội dung này để kiểm tra lỗi ở test; KHÔNG gọi `read_file` để đọc lại):
+```{language}
+{test_cases}
+```
 
-### CHIẾN LƯỢC ĐIỀU TRA BẰNG CHỨNG (TỐI ĐA 2-3 BƯỚC):
+### PROTOCOL CHUNG VÀ SKILL NGÔN NGỮ — CHỈ DÙNG ĐỂ ĐỊNH HƯỚNG ĐIỀU TRA:
+{common_skill}
+
+{investigation_skill}
+
+### CHIẾN LƯỢC ĐIỀU TRA BẰNG CHỨNG:
 1. **Bước 1 - Khám nghiệm điểm lỗi trực tiếp (`read_file`):**
    - Nếu Log lỗi Sandbox nêu rõ tệp và dòng cụ thể (ví dụ: `<đường_dẫn_tệp>:<số_dòng>: error...`), BẮT BUỘC dùng ngay `read_file` để kiểm tra tệp đó trước.
    - Chỉ dùng `search_code` khi trong log xuất hiện tên symbol/hàm/class nhưng bạn CHƯA BIẾT nó được định nghĩa ở tệp nào trong dự án.
@@ -246,18 +298,22 @@ TUYỆT ĐỐI KHÔNG ĐƯA RA NHẬN ĐỊNH CHỦ QUAN, KHÔNG TỰ QUY KẾT 
    - Nếu tệp bị lỗi đang gọi một symbol/class/hàm từ tệp khác nhưng bị báo lỗi chưa tìm thấy hoặc không tương thích, hãy dùng `read_file` đọc tệp chứa định nghĩa của symbol đó để xác minh:
      + Khai báo thực tế (prototype, class, hàm, struct, export/import).
      + Kiểu dữ liệu, tên symbol, chữ ký hàm thực tế có khớp với nơi gọi hay không.
-3. **Bước 3 - Kết thúc và Xuất bằng chứng khách quan (`<evidence>`):**
-   - Ngay sau khi đã đọc được nơi phát sinh lỗi và nơi định nghĩa đối ứng, DỪNG GỌI TOOL NGAY LẬP TỨC.
+3. **Bước 3 - Kiểm tra các frame lỗi liên quan:**
+   - Với traceback nhiều frame hoặc `During handling of the above exception`, đọc các file nguồn liên quan. Test harness đã có trong dữ liệu đầu vào; kiểm tra trực tiếp nội dung được cung cấp, không gọi `read_file` để đọc lại.
+   - Với `NameError`, kiểm tra import tại nơi dùng và định nghĩa symbol. Nếu lỗi ở `except` trong test harness, kiểm tra nội dung harness đã cung cấp.
+4. **Bước 4 - Kết thúc và xuất bằng chứng khách quan (`<evidence>`):**
+   - Chỉ dừng sau khi đã kiểm tra các vị trí của lỗi gốc và lỗi thứ cấp có liên quan trực tiếp trong traceback.
    - Xuất khối bằng chứng theo định dạng chuẩn:
      <evidence>
-     - Điểm phát sinh lỗi: [Đường dẫn tệp, số dòng và đoạn code ngắn thực tế]
+     - Lỗi gốc: [Đường dẫn tệp, số dòng, thông báo và đoạn code/import thực tế]
+     - Lỗi thứ cấp (nếu có): [Vị trí phát sinh khi xử lý lỗi và bằng chứng]
      - Điểm đối ứng/định nghĩa: [Đường dẫn tệp định nghĩa và đoạn code ngắn thực tế]
      - Dữ kiện thực tế ghi nhận: [Liệt kê các sự thật khách quan quan sát được từ code, không suy đoán, không phán xét]
      </evidence>
      ĐÃ ĐỦ BẰNG CHỨNG
 
 <constrain>
-- TIÊU CHÍ HÀNG ĐẦU: Thu thập nhanh, đúng trọng tâm. Chỉ đọc tối đa 2-3 tệp liên quan trực tiếp đến lỗi.
+- TIÊU CHÍ HÀNG ĐẦU: Thu thập nhanh, đúng trọng tâm. Đọc các file nguồn liên quan trực tiếp đến từng lỗi độc lập trong traceback. Nội dung test harness đã có sẵn trong prompt, không đọc lại bằng tool.
 - KHÔNG đọc lan man sang các tệp không xuất hiện trong log lỗi hoặc không liên quan đến symbol lỗi.
 - KHÔNG ĐƯỢC PHÁN XÉT: Không viết các câu nhận định như "Lỗi do Planner", "Coder làm sai", "Tester sai". Quyền phán quyết 100% thuộc về Thẩm phán ở pha sau.
 </constrain>
@@ -312,9 +368,8 @@ TUYỆT ĐỐI KHÔNG ĐƯA RA NHẬN ĐỊNH CHỦ QUAN, KHÔNG TỰ QUY KẾT 
             has_read = any(func == "read_file" for func, _ in executed_tool_calls)
             is_done_signaled = any(phrase in content.upper() for phrase in ["ĐÃ ĐỦ", "ĐÃ ĐỦ BẰNG CHỨNG", "ĐÃ ĐỦ THÔNG TIN"])
 
-            # Nếu model đã phát tín hiệu kết thúc sau khi đã đọc ít nhất 1 file -> Dừng ngay
             if is_done_signaled and has_read:
-                print(f"✅ [Reviewer] Phát hiện tín hiệu dừng ('ĐÃ ĐỦ BẰNG CHỨNG') sau khi đã kiểm tra thực địa.")
+                print("✅ [Reviewer] Điều tra viên báo đã đủ bằng chứng; kết thúc điều tra.")
                 break
 
             # Bắt trường hợp tool_calls native
@@ -428,6 +483,11 @@ TUYỆT ĐỐI KHÔNG ĐƯA RA NHẬN ĐỊNH CHỦ QUAN, KHÔNG TỰ QUY KẾT 
             f"- `{filepath}` ({len(content)} characters)" 
             for filepath, content in files_dict.items()
         ])
+        plan_contract_summary = "\n".join(
+            f"- `{spec.filepath}`: {spec.interface_summary or spec.purpose}; "
+            f"dependencies={spec.dependencies}"
+            for spec in plan.files
+        )
         code_overview = ""
         for filepath, content in files_dict.items():
             code_overview += f"\n--- FILE: `{filepath}` ---\n```{plan.target_language}\n{content}\n```\n"
@@ -440,10 +500,11 @@ TUYỆT ĐỐI KHÔNG ĐƯA RA NHẬN ĐỊNH CHỦ QUAN, KHÔNG TỰ QUY KẾT 
             evidence_sections.append(
                 f"### [HỒ SƠ BẰNG CHỨNG HIỆN TRƯỜNG TỪ ĐIỀU TRA VIÊN (OBJECTIVE EVIDENCE)]:\n{latest_evidence}"
             )
-
-        if investigation_notes:
+        elif investigation_notes:
             evidence_sections.append(
-                f"### [MÃ NGUỒN CÁC TỆP LIÊN QUAN ĐÃ THU THẬP TỪ TOOLS]:\n" + "\n---\n".join(investigation_notes)
+                "### [MÃ NGUỒN LIÊN QUAN ĐÃ THU THẬP TỪ TOOLS "
+                "(FALLBACK: KHÔNG CÓ KHỐI EVIDENCE)]:\n"
+                + "\n---\n".join(investigation_notes)
             )
 
         if evidence_sections:
@@ -460,11 +521,16 @@ Dưới đây là hồ sơ chứng cứ do điều tra viên thu thập từ hi�
 <context>
 ### [PLAN HIỆN TẠI (PLANNER)]:
 Kiến trúc: {plan.architecture_pattern}
-CHÚ Ý: TẤT CẢ CÁC TỆP DƯỚI ĐÂY ĐỀU ĐÃ ĐƯỢC TẠO RA VÀ ĐANG TỒN TẠI TRONG DỰ ÁN:
+Ngôn ngữ: {language}
+### File contracts from the Planner:
+{plan_contract_summary}
+### Files currently existing in the project:
 {existing_files_summary}
+</context>
 
 ### LOG LỖI SANDBOX:
-{error_msg}
+{clean_error_msg}
+Phán quyết phải giải thích lỗi thất bại đầu tiên trong log này. Mọi kết luận và hướng sửa phải truy nguyên được về log, evidence, file list, plan hoặc testcase; không đưa ra API, symbol, module path hay đề xuất mới không có căn cứ. Dùng rule trong skill ngôn ngữ để phân tích và chọn target.
 
 <testcase - testharness>
 {test_cases}
@@ -472,57 +538,31 @@ CHÚ Ý: TẤT CẢ CÁC TỆP DƯỚI ĐÂY ĐỀU ĐÃ ĐƯỢC TẠO RA VÀ 
 
 {gathered_context}
 
-### QUY TRÌNH THẨM ĐỊNH VÀ NGUYÊN TẮC PHÂN ĐỊNH TRÁCH NHIỆM:
-Danh sách file trách nhiệm sửa lỗi:
-- Các file test_harness.py, test_harness.java, test_harness.c --> Thuộc về Tester
-- Tất cả các file còn lại trong dự án --> Coder và Planner
+### REVIEW SKILL — QUY TẮC PHÂN TÍCH CHO {language.upper()}:
+Áp dụng các rule sau khi chúng phù hợp với log và bằng chứng thực tế. Đây là hướng dẫn phân tích,
+không thay thế specification, plan, mã nguồn hoặc kết quả sandbox:
+{verdict_skill}
+
+### SHARED REVIEW PROTOCOL:
+{common_skill}
+
+### Decision requirements:
+- Start from the first failure in the sandbox log. The stack trace's test frame is not itself proof that the test harness caused the failure.
+- Explain the exact failing symbol/construct using the matching source evidence. When the evidence says a name is used but not imported, check its definition and the failing file's imports before deciding.
+- Select PLANNER only when the plan's file/interface/dependency contract is itself missing or contradictory. A source file that fails to implement its planned contract belongs to CODER. A defect solely in the test harness belongs to TESTER.
+- Use only files and symbols present in the log, provided evidence, plan, source files, or test harness. Do not invent an unrelated exception, method, file, or sample implementation.
+- `failed_files` must contain only existing project files that need modification. Do not put a test harness in this list unless it is actually the primary failing artifact and is handled as TESTER.
+- Give a minimal correction that fixes the evidenced cause and preserves the existing plan/API. Do not offer speculative alternatives or generic instructions.
 </context>
-<thought>
-BƯỚC 1: Dựa vào log lỗi và hồ sơ chứng cứ xác định nguyên nhân chính
-
-BƯỚC 2: CÂY QUYẾT ĐỊNH PHÂN ĐỊNH TRÁCH NHIỆM (CHỌN DUY NHẤT 1 TARGET):
-
-1. **LỖI BIÊN DỊCH / CÚ PHÁP TẠI TỆP MÃ NGUỒN DỰ ÁN (LOẠI TRỪ TESTER):**
-   - Nếu tệp bị lỗi trong log là tệp mã nguồn dự án của Coder/Planner (ví dụ: file .c, .h, .py, .java của dự án bị lỗi cú pháp, undefined symbol, thiếu header/import):
-     -> NGUYÊN TẮC CỐT LÕI: Khi mã nguồn dự án không biên dịch được. Do đó lỗi 100% thuộc về CODER hoặc PLANNER, NGHIÊM CẤM ĐỔ LỖI CHO TESTER!
-   - Phân định giữa PLANNER và CODER (Căn cứ vào plan và code):
-     + **PLANNER (GLOBAL)**: Plan thiếu, sai, lệch , class, method, interface, dependancies giữa các file trong plan. 
-     + **CODER (LOCAL)**: Plan đúng, có đề cập nhưng Coder không triển khai đúng, thiếu những gì plan đề cập, sai cú pháp, sai logic thân hàm.
-
-2. LỖI BIÊN DỊCH / KHÔNG TÌM THẤY KÝ HIỆU TẠI TỆP KIỂM THỬ (TEST HARNESS)(LOẠI TRỪ PLANNER) 
-   - Áp dụng khi log lỗi biên dịch/import chỉ ra vị trí đứt gãy xuất hiện, nằm trong file TestHarness (ví dụ: `TestHarness.java:8: error: cannot find symbol`, `testharness.c...`, `testharness.py...`)::
-   BẮT BUỘC LẤY SPECIFICATION LÀM CHÂN LÝ ĐỂ ĐỐI CHIẾU:
-   Trích xuất đúng Class / Method / Field / Signature đang bị báo lỗi trong TestHarness và so sánh với [1. YÊU CẦU BÀI TOÁN GỐC (SPECIFICATION)]:
-
-   + TRƯỜNG HỢP 2.1 - CODER SAI (CODER / LOCAL):
-     Nếu Class / Method / Signature /Interface mà TestHarness gọi CÓ ĐƯỢC YÊU CẦU TRONG SPECIFICATION, nhưng Coder không khai báo, đặt sai tên, truyền sai tham số, hoặc chưa triển khai.
-     -> PHÁN QUYẾT: CODER (LOCAL).
-     -> Root cause: Coder vi phạm hợp đồng (Contract) đã được quy định trong Specification.
-
-   + TRƯỜNG HỢP 2.2 - TESTER SAI (TESTER / TESTCASE):
-     Nếu Class / Method / Signature /Interface mà TestHarness gọi KHÔNG XUẤT HIỆN TRONG SPECIFICATION (Tester tự bịa ra tên hàm/Class/Interface mới, truyền thêm tham số không có trong đề bài, hoặc import/include sai package, class, thư viện).
-     -> PHÁN QUYẾT: TESTER (TESTCASE).
-     -> Root cause: Tester tự ý thay đổi Hợp đồng API (Contract) khác với yêu cầu bài toán gốc.
-
-3. **LỖI RUNTIME / ASSERTION FAILURE (MÃ CHẠY ĐƯỢC NHƯNG TEST THẤT BẠI):** (LOẠI TRỪ PLANNER)
-   - Áp dụng khi mã nguồn và TestHarness đều biên dịch thành công, nhưng khi thực thi bị Exception hoặc Assert fail.
-   - Đối chiếu với [1. YÊU CẦU BÀI TOÁN GỐC]:
-     + Nếu Coder tính toán sai thuật toán hoặc không đáp ứng đúng yêu cầu đề bài -> Chọn **CODER (LOCAL)**.
-     + Nếu Coder đã làm đúng yêu cầu đề bài nhưng Testcase, assertion của file test kiểm tra điều kiện vô lý hoặc sai giá trị kỳ vọng -> Chọn **TESTER (TESTCASE)**.
-
-BƯỚC 3: HƯỚNG DẪN SỬA (instructions):
-   - Phải nêu rõ: sửa file nào, dòng/hàm nào, thay bằng cú pháp gì.
-   - Hướng dẫn phải sửa đúng Root Cause, không đưa ra lời khuyên chung chung.
-</thought>
 <output_format>
 {{
 "status": "REJECTED",
 "target": "PLANNER" | "CODER" | "TESTER",
 "error_category": "GLOBAL" | "LOCAL" | "TESTCASE",
-"failed_files": ["chỉ các file chứa nguyên nhân gốc cần sửa, không gồm caller hoặc file chỉ được nhắc tới"],
-"root_cause": "nguyên nhân đã xác minh và vị trí phát sinh thực sự; phân biệt với nơi lỗi được gọi hoặc phát hiện",
-"instructions": "cách sửa tối thiểu, cụ thể, hợp lệ với code/API thực tế; nêu file và thay đổi cần thực hiện, không đưa ra hướng dẫn chung chung",
-"audit_table": "tóm tắt đối chiếu"
+"failed_files": ["exact existing project file paths that need changes"],
+"root_cause": "the first evidenced failure, exact file/line/symbol, and why it fails",
+"instructions": "minimal change supported by the evidence; preserve planned interfaces",
+"audit_table": "evidence-to-conclusion mapping; mention secondary issues only when present in the log/evidence"
 }}
 </output_format>
 """
@@ -534,14 +574,14 @@ BƯỚC 3: HƯỚNG DẪN SỬA (instructions):
         json_obj = self.extract_json_object(raw_resp)
         if json_obj and "target" in json_obj:
             try:
-                target_str = str(json_obj.get("target", "UNKNOWN")).upper().strip()
+                target_str = str(json_obj.get("target", "CODER")).upper().strip()
                 if "PLANNER" in target_str:
                     target_enum = ReviewTarget.PLANNER
                     cat = "GLOBAL"
                 elif "TESTER" in target_str:
                     target_enum = ReviewTarget.TESTER
                     cat = "TESTCASE"
-                elif "PASSED" in target_str:
+                elif target_str == "PASSED":
                     target_enum = ReviewTarget.PASSED
                     cat = "NONE"
                 else:
@@ -563,10 +603,14 @@ BƯỚC 3: HƯỚNG DẪN SỬA (instructions):
 
                 valid_failed_files = [f for f in failed_files_list if f in files_dict]
 
+                response_category = str(json_obj.get("error_category", cat)).upper().strip()
+                if response_category not in {"GLOBAL", "LOCAL", "TESTCASE", "NONE"}:
+                    response_category = cat
+
                 decision_kwargs = {
                     "status": str(json_obj.get("status", "REJECTED")),
                     "target": target_enum,
-                    "error_category": str(json_obj.get("error_category", cat)),
+                    "error_category": response_category,
                     "root_cause": str(json_obj.get("root_cause", "Phát hiện lỗi khi thực thi sandbox.")),
                     "instructions": str(json_obj.get("instructions", "Vui lòng kiểm tra và sửa đổi theo log lỗi.")),
                     "audit_table": audit_table_val
@@ -585,7 +629,8 @@ BƯỚC 3: HƯỚNG DẪN SỬA (instructions):
             except Exception as e:
                 print(f"⚠️ [Reviewer] Lỗi parse sang ReviewDecision: {e}")
 
-        return self._fallback_parse_decision(raw_resp, error_msg, files_dict)
+        fallback_decision = self._fallback_parse_decision("", error_msg, files_dict)
+        return fallback_decision
 
     def _fallback_parse_decision(
         self,
@@ -607,7 +652,13 @@ BƯỚC 3: HƯỚNG DẪN SỬA (instructions):
             category = "TESTCASE"
 
         # Quét tệp lỗi từ files_dict
-        detected_files = [f for f in files_dict.keys() if f in raw_resp or os.path.basename(f) in raw_resp]
+        detected_files = [
+            f for f in files_dict.keys()
+            if f in raw_resp
+            or os.path.basename(f) in raw_resp
+            or f in error_msg
+            or os.path.basename(f) in error_msg
+        ]
 
         return ReviewDecision(
             status="REJECTED",
