@@ -266,62 +266,32 @@ class ReviewerAgent(BaseAgent):
             selected_tools=selected_tool_names
         )
 
-        # =====================================================================
-        # PHA 1: ĐIỀU TRA HIỆN TRƯỜNG MÃ NGUỒN (CHỈ DÙNG TOOLS - THU THẬP BẰNG CHỨNG KHÁCH QUAN)
-        # =====================================================================
-        investigate_prompt = f"""Bạn là Kỹ thuật viên Giám định Hiện trường Mã nguồn (Forensic Code Investigator).
-Nhiệm vụ DUY NHẤT: Thu thập BẰNG CHỨNG MÃ NGUỒN THỰC TẾ (FACTS / CODE SNIPPETS) tại các vị trí xảy ra lỗi để chuyển giao cho Thẩm phán (Verdict).
-TUYỆT ĐỐI KHÔNG ĐƯA RA NHẬN ĐỊNH CHỦ QUAN, KHÔNG TỰ QUY KẾT TRÁCH NHIỆM CHO BẤT KỲ AGENT NÀO (Planner/Coder/Tester).
+        investigate_prompt = f"""Kiểm tra log sandbox và các phần mã nguồn liên quan. Làm theo hướng dẫn điều tra của ngôn ngữ, rồi trả về các vị trí lỗi cùng nội dung source/declaration cần để đối chiếu.
 
-### DỮ LIỆU ĐẦU VÀO:
-- Mục tiêu bài toán: {task_goal}
-- Ngôn ngữ dự án: {language}
-- Kiến trúc: {plan.architecture_pattern}
-- Danh sách tệp dự án: {[f.filepath for f in plan.files]}
-- Log lỗi Sandbox:
-{clean_error_msg if clean_error_msg else "Không có log lỗi."}
-- Nội dung test harness đã được cung cấp sẵn (dùng nội dung này để kiểm tra lỗi ở test; KHÔNG gọi `read_file` để đọc lại):
+### Input
+- Goal: {task_goal}
+- Language: {language}
+- Plan: {plan.architecture_pattern}
+- Project files: {[f.filepath for f in plan.files]}
+- Sandbox log:
+{clean_error_msg if clean_error_msg else "No sandbox log."}
+- Test harness/input:
 ```{language}
 {test_cases}
 ```
 
-### PROTOCOL CHUNG VÀ SKILL NGÔN NGỮ — CHỈ DÙNG ĐỂ ĐỊNH HƯỚNG ĐIỀU TRA:
+### Investigation guidance
 {common_skill}
 
 {investigation_skill}
 
-### CHIẾN LƯỢC ĐIỀU TRA BẰNG CHỨNG:
-1. **Bước 1 - Khám nghiệm điểm lỗi trực tiếp (`read_file`):**
-   - Nếu Log lỗi Sandbox nêu rõ tệp và dòng cụ thể (ví dụ: `<đường_dẫn_tệp>:<số_dòng>: error...`), BẮT BUỘC dùng ngay `read_file` để kiểm tra tệp đó trước.
-   - Chỉ dùng `search_code` khi trong log xuất hiện tên symbol/hàm/class nhưng bạn CHƯA BIẾT nó được định nghĩa ở tệp nào trong dự án.
-2. **Bước 2 - Kiểm tra điểm đối ứng / Hợp đồng (`read_file`):**
-   - Nếu tệp bị lỗi đang gọi một symbol/class/hàm từ tệp khác nhưng bị báo lỗi chưa tìm thấy hoặc không tương thích, hãy dùng `read_file` đọc tệp chứa định nghĩa của symbol đó để xác minh:
-     + Khai báo thực tế (prototype, class, hàm, struct, export/import).
-     + Kiểu dữ liệu, tên symbol, chữ ký hàm thực tế có khớp với nơi gọi hay không.
-3. **Bước 3 - Kiểm tra các frame lỗi liên quan:**
-   - Với traceback nhiều frame hoặc `During handling of the above exception`, đọc các file nguồn liên quan. Test harness đã có trong dữ liệu đầu vào; kiểm tra trực tiếp nội dung được cung cấp, không gọi `read_file` để đọc lại.
-   - Với `NameError`, kiểm tra import tại nơi dùng và định nghĩa symbol. Nếu lỗi ở `except` trong test harness, kiểm tra nội dung harness đã cung cấp.
-4. **Bước 4 - Kết thúc và xuất bằng chứng khách quan (`<evidence>`):**
-   - Chỉ dừng sau khi đã kiểm tra các vị trí của lỗi gốc và lỗi thứ cấp có liên quan trực tiếp trong traceback.
-   - Xuất khối bằng chứng theo định dạng chuẩn:
-     <evidence>
-     - Lỗi gốc: [Đường dẫn tệp, số dòng, thông báo và đoạn code/import thực tế]
-     - Lỗi thứ cấp (nếu có): [Vị trí phát sinh khi xử lý lỗi và bằng chứng]
-     - Điểm đối ứng/định nghĩa: [Đường dẫn tệp định nghĩa và đoạn code ngắn thực tế]
-     - Dữ kiện thực tế ghi nhận: [Liệt kê các sự thật khách quan quan sát được từ code, không suy đoán, không phán xét]
-     </evidence>
-     ĐÃ ĐỦ BẰNG CHỨNG
-
-<constrain>
-- TIÊU CHÍ HÀNG ĐẦU: Thu thập nhanh, đúng trọng tâm. Đọc các file nguồn liên quan trực tiếp đến từng lỗi độc lập trong traceback. Nội dung test harness đã có sẵn trong prompt, không đọc lại bằng tool.
-- KHÔNG đọc lan man sang các tệp không xuất hiện trong log lỗi hoặc không liên quan đến symbol lỗi.
-- KHÔNG ĐƯỢC PHÁN XÉT: Không viết các câu nhận định như "Lỗi do Planner", "Coder làm sai", "Tester sai". Quyền phán quyết 100% thuộc về Thẩm phán ở pha sau.
-</constrain>
+### Evidence output
+Return an `<evidence>` block containing the reported diagnostic locations and messages, relevant source snippets, and related declarations/imports/build facts that you inspected. End with `ĐÃ ĐỦ BẰNG CHỨNG` when the relevant evidence is collected.
 """
 
         initial_user_msg = (
             f"Bắt đầu thu thập chứng cứ cho log lỗi sau:\n{clean_error_msg}\n\n"
-            f"Hãy bắt đầu bằng cách dùng tool `read_file` để đọc ngay tệp bị báo lỗi đầu tiên trong log lỗi (hoặc `search_code` nếu chưa rõ vị trí định nghĩa symbol lỗi)."
+            "Làm theo hướng dẫn điều tra của ngôn ngữ để kiểm tra log và các source liên quan."
         )
 
         messages: List[Dict[str, Any]] = [
@@ -549,7 +519,6 @@ không thay thế specification, plan, mã nguồn hoặc kết quả sandbox:
 ### Decision requirements:
 - Start from the first failure in the sandbox log. The stack trace's test frame is not itself proof that the test harness caused the failure.
 - Explain the exact failing symbol/construct using the matching source evidence. When the evidence says a name is used but not imported, check its definition and the failing file's imports before deciding.
-- Select PLANNER only when the plan's file/interface/dependency contract is itself missing or contradictory. A source file that fails to implement its planned contract belongs to CODER. A defect solely in the test harness belongs to TESTER.
 - Use only files and symbols present in the log, provided evidence, plan, source files, or test harness. Do not invent an unrelated exception, method, file, or sample implementation.
 - `failed_files` must contain only existing project files that need modification. Do not put a test harness in this list unless it is actually the primary failing artifact and is handled as TESTER.
 - Give a minimal correction that fixes the evidenced cause and preserves the existing plan/API. Do not offer speculative alternatives or generic instructions.

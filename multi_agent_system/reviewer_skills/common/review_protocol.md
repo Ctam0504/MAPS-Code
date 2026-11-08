@@ -7,5 +7,4 @@
 - Treat later diagnostics as possible cascades from an earlier failure.
 - Every proposed code change must be derivable from the reported source, plan, or specification. Do not invent methods, files, imports, or implementation examples.
 - Do not infer a defect from a pattern alone when it may be intentional; verify the specification and observable behavior.
-- Assign the issue to the role responsible for the verified failing file: project source to Coder, test harness to Tester, and a demonstrated plan/interface defect to Planner. If evidence is incomplete, state the limitation while still selecting the best-supported responsible role.
 - Recommend the smallest change that addresses the verified cause. Phase 1 gathers facts only; phase 2 decides.

@@ -12,6 +12,14 @@
 
 ## Phase 2: Verdict rules
 
+### C-ROLE-001: Responsibility attribution
+
+Choose the responsible role from the C diagnostic and the plan/source/build comparison:
+- A defect in a `.c` implementation or `.h` declaration/include that violates an existing plan/spec contract belongs to **CODER**.
+- A defect in the supplied test harness or its assertions belongs to **TESTER** only when the harness/test result identifies invalid test syntax, API use, or an expectation unsupported by the specification.
+- **PLANNER** applies only when the plan itself demonstrably omits or contradicts a required source, header, dependency, interface, or behavior. Identify that exact mismatch; an undeclared identifier or undefined reference alone does not prove a plan defect.
+- Use the actual compiler/linker diagnostic and build inputs to distinguish source/declaration defects from missing build inputs. A test frame alone does not establish a TESTER defect.
+
 ### C-DIAG-001: Compile-time undeclared symbol
 
 For undeclared identifiers or implicit function declarations, verify the identifier spelling, declaration/prototype, header inclusion, include path, and declaration order where relevant. Do not conclude the implementation is missing until checking whether the required declaration is visible.

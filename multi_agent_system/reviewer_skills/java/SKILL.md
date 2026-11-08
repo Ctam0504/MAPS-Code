@@ -2,31 +2,42 @@
 
 ## Phase 1: Investigation guidance
 
-- Read the actual build/test result and diagnostics. Record each distinct error's file, line, message, and symbol/construct; inspect the reported source and relevant declarations.
-- For unresolved names, verify spelling, scope, package/import, visibility, and whether the declaration is part of the compilation. A type found elsewhere is not necessarily visible here; a path alone does not determine its package.
-- For test failures, distinguish production compilation from harness compilation. The Java harness may be supplied in the prompt and absent from the workspace; inspect supplied test text instead of searching for a project file.
-- For type, access, source-layout, classpath, or dependency errors, verify the exact declaration and build configuration before proposing a change.
-- For checked exceptions, trace compile-time `throws` signatures through interfaces and wrappers. Inspect catch behavior and interruption handling; do not infer a caller can catch an exception merely because a deeper implementation throws it.
-- Use only evidence in the current log, source, plan, test, and build configuration. Do not invent files, APIs, dependencies, or expected behavior.
+1. Make a short worklist from the compiler log: unique `(file, symbol, line)` diagnostics. Do not add files because they are related by design or appear in an implementation chain.
+2. Read only the unique project files named in that worklist and inspect only the reported lines plus their package/import declarations.
+3. For an unresolved symbol, inspect its declaration once for that diagnostic group. If the plan/file list gives its path, read that path directly; use `search_code` only when the declaration path is not available there. Read the declaration's actual `package`; do not infer it from its path.
+4. Do not inspect callers, implementers, sibling commands, or other dependents unless one of their own lines appears in the compiler diagnostics or the current diagnostic cannot be explained without that specific file. Do not inspect the test harness unless the log reports a harness error or test failure.
+5. Stop after the worklist is covered and any unresolved discrepancy is stated. Return only the diagnostic locations and the source facts needed to explain them. For checked-exception diagnostics, inspect the relevant `throws` signatures and catch site.
 
 ## Phase 2: Verdict rules
 
+### JAVA-ROLE-001: Responsibility attribution
+
+Choose the responsible role from the Java diagnostic's artifact and the plan/source comparison:
+- A project `.java` source that fails a contract already specified by the plan belongs to **CODER**.
+- A supplied harness diagnostic or failing assertion caused by invalid test syntax, import, API use, or unsupported expectation belongs to **TESTER**.
+- **PLANNER** applies only when the plan itself demonstrably omits or contradicts a required type, package/dependency relationship, or behavior. Identify that exact mismatch; `cannot find symbol` alone does not establish a plan defect.
+- Preserve the compiler-reported artifact and line. Do not assign TESTER without evidence in the harness/test result, or PLANNER without evidence in the plan.
+
 ### JAVA-LOG-001: Compiler evidence is authoritative
 
-When the sandbox reports a non-zero exit and compiler errors, the build failed. The verdict must not say the exit code was zero, that evidence is absent, request the same log again, or return an empty audit. Preserve the compiler's file and line; list each distinct diagnostic and connect it to inspected code. Group errors only when evidence confirms a shared cause. If errors are all in `TestHarness.java`, treat them as harness-compilation failures; do not replace them with a runtime/behavioral theory inferred from production code. No tests ran unless the log says they ran. If evidence conflicts, trust the actual run output and identify the conflict explicitly.
+Build the verdict from the current sandbox log and the collected source evidence together. If the result is `FAILED` and the log contains compiler errors, reject the run and address those errors; never return “no evidence of failure,” “no changes required,” or a success-shaped verdict. Investigator text, search summaries, and code overview cannot override the compiler output.
+
+For each distinct compiler error, carry its reported file, line, symbol, and message into the audit, then explain it using the inspected source/declaration. Do not invent a different error or discard a diagnostic because another part of the code appears valid. If the inspected code seems to contradict the compiler, identify that unresolved discrepancy and check the relevant package/import or build input before concluding; do not claim the compile passed.
+
+When the source evidence confirms that a project file uses a type from another declared package without importing it, assign **CODER**, list that use-site file in `failed_files`, and give the import using the declaration's actual package. Do not list the valid type declaration as a repair target.
 
 ### JAVA-DIAG-001: Symbols, packages, and responsibility
 
-For `cannot find symbol`, identify the symbol and compare its use with its declaration, package/import, visibility, and compilation inputs. Do not call a type missing if it is defined. Report the file named by the compiler; never transfer a harness diagnostic to a production file based on a matching symbol or line number.
+For each `cannot find symbol`, inspect the complete reported source and the declaration source. Read the actual `package` declaration and imports in both files; never derive a Java package name from a directory or file path. If an import is needed, use the package declared by the type's source. A type's existence elsewhere does not mean the failing source can access it.
 
-For a project-source error, assign **CODER** when production fails a contract already specified by the plan. Assign **PLANNER** only when the plan itself demonstrably omits or contradicts a task requirement, or defines an impossible cross-file contract.
+Keep `failed_files` to project files whose code must change to address the diagnosed use. Do not list a valid declaration file merely because it defines the unresolved symbol; list it only if its declaration/package is itself wrong or incomplete.
 
-For a harness error, compare the supplied test's imports and usage with the production API and plan. When many `cannot find symbol` errors in the harness name production types from several packages, check its package/imports and the test compiler's production source/classpath inputs as one possible shared cause; do not turn an unrelated production `throw`, exception contract, or behavior into the root cause unless that exact issue appears in the diagnostics:
-- Test is invalid while production satisfies the plan → **TESTER**.
-- Test validly checks the planned contract but production violates it → **CODER**.
-- Plan itself causes the contract defect → **PLANNER**.
+Choose the owner only after comparing the diagnosed Java source and its declared-package/import requirements with the actual plan:
+- Assign **CODER** when the plan specifies the required type/contract but production source has the wrong or missing import, package reference, declaration, or implementation.
+- Assign **PLANNER** only when a specific required type, package/dependency relationship, or contract is absent or contradictory in the plan. Name that plan entry and the corresponding task requirement.
+- Assign **TESTER** only for a defect evidenced in the supplied harness or a failing test result. Preserve the harness diagnostic location; do not transfer it to production code based on a matching symbol.
 
-Missing test imports, access to non-public implementation details, use of a `void` method as a value, and unsupported test expectations are TESTER defects—not evidence for PLANNER. The harness may not exist in the workspace: its `read_file` failure is expected, not a root cause. Never add the harness to project `failed_files` or propose creating it as production source; use an empty list if no production file needs changes. Multiple unresolved test symbols may share a test import/package or classpath cause; verify before splitting findings.
+For harness errors, inspect the supplied test's imports and usage against the production API. Missing test imports, invalid API use, and unsupported expectations belong to TESTER when confirmed. The harness may be absent from the workspace; that alone is not a failure. Never add it to project `failed_files` or request creating it as production source.
 
 For `package ... does not exist` or external symbols, check source roots, build command, classpath/module path, and declared dependencies. Do not invent dependencies or restructure packages without evidence.
 

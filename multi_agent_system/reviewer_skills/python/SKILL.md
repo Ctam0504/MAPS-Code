@@ -18,6 +18,14 @@
 
 ## Phase 2: Verdict rules
 
+### PY-ROLE-001: Responsibility attribution
+
+Choose the responsible role from the Python failure location and the specification/plan comparison:
+- A defect in a project module's implementation or imports belongs to **CODER** when the plan specifies the required behavior or interface.
+- A defect in the supplied test harness belongs to **TESTER** when its syntax, imports, API use, or expected result is wrong for the specified contract.
+- **PLANNER** applies only when the plan itself omits or contradicts a required module, dependency, interface, or behavior. Identify that exact mismatch; a project traceback or test failure alone is not evidence against the plan.
+- Base attribution on the traceback frame, failing expression, import resolution, or assertion result. A test frame calling project code does not by itself make the test responsible.
+
 ### PY-DIAG-001: Syntax and indentation diagnostics
 
 Treat the interpreter's file, line, and error text as the location to investigate, not proof that the exact token on that line is the root cause. Check the preceding statement and nearby block structure. Attribute the issue only after confirming the source and expected syntax.
