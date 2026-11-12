@@ -42,8 +42,6 @@ MAPS_Code/
 │   │   ├── reviewer_agent.py     # Error investigation & agent feedback allocation
 │   │   └── tester_agent.py       # Test case generation for code verification
 │   ├── reviewer_skills/
-│   │   ├── common/
-│   │   │   └── review_protocol.md # Shared evidence and verdict protocol
 │   │   ├── python/SKILL.md       # Python diagnostics and review rules
 │   │   ├── java/SKILL.md         # Java diagnostics and review rules
 │   │   └── c/SKILL.md            # C diagnostics and review rules
