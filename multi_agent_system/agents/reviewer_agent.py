@@ -49,6 +49,22 @@ class ReviewerAgent(BaseAgent):
             timeout=self.timeout
         )
 
+    @staticmethod
+    def _sanitize_sandbox_paths(text: str) -> str:
+        """
+        Thay thế mọi đường dẫn tuyệt đối sandbox trong error log bằng tên tệp tương đối.
+        Ví dụ: 'D:\\Thesis\\...sandbox_run_abc123\\test_harness.py' -> 'test_harness.py'
+        """
+        if not text:
+            return text
+        # Xóa phần đường dẫn sandbox, chỉ giữ lại tên tệp tương đối phía sau
+        sanitized = re.sub(
+            r'[A-Za-z]:[\\\\/](?:[^\\\\/\s"\'`]+[\\\\/])*\.sandbox_workspace[\\\\/]sandbox_run_[a-f0-9]+[\\\\/]',
+            '',
+            text
+        )
+        return sanitized
+
     def _truncate_error_log(self, error_msg: str, max_lines: int = 60) -> str:
         """Thu gọn error log quá dài, giữ lại đầu và cuối stacktrace để tránh tràn context."""
         lines = error_msg.strip().splitlines()
@@ -170,6 +186,53 @@ class ReviewerAgent(BaseAgent):
                     return None
             return None
 
+    @staticmethod
+    def _intercept_tool_call(func_name: str, args: Any) -> Optional[str]:
+        """
+        Layer 2: Chặn các tool call không hợp lệ trước khi thực thi.
+        Trả về message hướng dẫn nếu bị chặn, None nếu hợp lệ.
+        """
+        if func_name != "read_file":
+            return None
+        
+        file_path = ""
+        if isinstance(args, dict):
+            file_path = str(args.get("file_path", ""))
+        elif isinstance(args, str):
+            file_path = args
+        
+        file_path_lower = file_path.lower().replace("\\", "/")
+        
+        # Chặn đọc test_harness / TestHarness (nội dung đã có sẵn trong prompt)
+        basename = file_path_lower.rsplit("/", 1)[-1] if "/" in file_path_lower else file_path_lower
+        if "test_harness" in basename or "testharness" in basename:
+            return (
+                "[HỆ THỐNG] CHẶN: Nội dung tệp kiểm thử (Test Harness) ĐÃ ĐƯỢC CUNG CẤP SẴN "
+                "trong phần `<testcase - testharness>` ở trên. "
+                "KHÔNG CẦN và KHÔNG ĐƯỢC gọi read_file để đọc lại tệp kiểm thử. "
+                "Hãy sử dụng nội dung đã cung cấp sẵn để phân tích, "
+                "sau đó trình bày kết quả điều tra bằng văn bản thường."
+            )
+        
+        # Chặn đường dẫn tuyệt đối hoặc sandbox
+        if ".sandbox_workspace" in file_path_lower:
+            return (
+                "[HỆ THỐNG] CHẶN: Đường dẫn sandbox không hợp lệ. "
+                "Chỉ sử dụng đường dẫn tương đối trong workspace dự án "
+                "(ví dụ: `src/Main.java`, `listeners/payment_listener.py`). "
+                "Nội dung tệp kiểm thử đã có sẵn trong prompt, không cần đọc lại."
+            )
+        
+        # Chặn đường dẫn tuyệt đối (bắt đầu bằng ổ đĩa hoặc /)
+        if re.match(r'[A-Za-z]:[\\\/]', file_path) or (file_path.startswith("/") and len(file_path) > 1):
+            return (
+                "[HỆ THỐNG] CHẶN: Đường dẫn tuyệt đối không hợp lệ. "
+                "Chỉ sử dụng đường dẫn tương đối trong workspace dự án "
+                f"(ví dụ: thay vì `{file_path}`, dùng tên tệp tương đối như `{basename}`)."
+            )
+        
+        return None
+
     def _execute_tool(self, tools_map: Dict[str, Any], func_name: str, args: Any) -> str:
         """Thực thi tool từ tools_map của LangChain."""
         print("\n" + "─"*50)
@@ -204,11 +267,9 @@ class ReviewerAgent(BaseAgent):
     def _load_review_skill(target_language: str) -> Tuple[str, str, str, str]:
         language = LanguageType.from_str(target_language).value
         skills_dir = Path(__file__).resolve().parents[1] / "reviewer_skills"
-        common_path = skills_dir / "common" / "review_protocol.md"
         language_path = skills_dir / language / "SKILL.md"
 
         try:
-            common_rules = common_path.read_text(encoding="utf-8")
             skill_content = language_path.read_text(encoding="utf-8")
         except OSError as exc:
             raise RuntimeError(f"Không thể nạp Reviewer skill cho ngôn ngữ '{language}': {exc}") from exc
@@ -235,7 +296,6 @@ class ReviewerAgent(BaseAgent):
 
         return (
             language,
-            common_rules.strip(),
             investigation_match.group(1).strip(),
             verdict_match.group(1).strip()
         )
@@ -249,10 +309,12 @@ class ReviewerAgent(BaseAgent):
         error_msg: str,
         workspace_dir: str
     ) -> ReviewDecision:
-        language, common_skill, investigation_skill, verdict_skill = self._load_review_skill(
+        language, investigation_skill, verdict_skill = self._load_review_skill(
             plan.target_language
         )
-        clean_error_msg = self._truncate_error_log(error_msg, max_lines=50)
+        # Layer 1: Sanitize đường dẫn sandbox trước khi đưa vào prompt
+        sanitized_error_msg = self._sanitize_sandbox_paths(error_msg)
+        clean_error_msg = self._truncate_error_log(sanitized_error_msg, max_lines=50)
         
         # 1. Khởi tạo Tools (Bao gồm read_file và search_code)
         selected_tool_names = ["search_code", "read_file"]
@@ -265,28 +327,23 @@ class ReviewerAgent(BaseAgent):
             workspace_dir=workspace_dir,
             selected_tools=selected_tool_names
         )
+        investigate_prompt = f"""Bạn là Kỹ thuật viên Giám định Hiện trường Mã nguồn (Forensic Code Investigator).
+Nhiệm vụ DUY NHẤT: Thu thập BẰNG CHỨNG MÃ NGUỒN THỰC TẾ (FACTS) tại các vị trí xảy ra lỗi để chuyển giao cho Thẩm phán (Verdict).
+TUYỆT ĐỐI KHÔNG ĐƯA RA NHẬN ĐỊNH CHỦ QUAN.
 
-        investigate_prompt = f"""Kiểm tra log sandbox và các phần mã nguồn liên quan. Làm theo hướng dẫn điều tra của ngôn ngữ, rồi trả về các vị trí lỗi cùng nội dung source/declaration cần để đối chiếu.
-
-### Input
-- Goal: {task_goal}
-- Language: {language}
-- Plan: {plan.architecture_pattern}
-- Project files: {[f.filepath for f in plan.files]}
-- Sandbox log:
-{clean_error_msg if clean_error_msg else "No sandbox log."}
-- Test harness/input:
+### DỮ LIỆU ĐẦU VÀO:
+- Mục tiêu bài toán: {task_goal}
+- Ngôn ngữ dự án: {language}
+- Kiến trúc: {plan.architecture_pattern}
+- Danh sách tệp dự án: {[f.filepath for f in plan.files]}
+- Log lỗi Sandbox:
+{clean_error_msg if clean_error_msg else "Không có log lỗi."}
+- Nội dung tệp kiểm thử (Test Harness) đã được cung cấp sẵn (dùng nội dung này để kiểm tra nếu lỗi ở test; KHÔNG gọi `read_file` để đọc lại):
 ```{language}
 {test_cases}
 ```
-
-### Investigation guidance
-{common_skill}
-
+### HƯỚNG DẪN ĐIỀU TRA CHO {language.upper()}:
 {investigation_skill}
-
-### Evidence output
-Return an `<evidence>` block containing the reported diagnostic locations and messages, relevant source snippets, and related declarations/imports/build facts that you inspected. End with `ĐÃ ĐỦ BẰNG CHỨNG` when the relevant evidence is collected.
 """
 
         initial_user_msg = (
@@ -300,7 +357,7 @@ Return an `<evidence>` block containing the reported diagnostic locations and me
         ]
 
         investigation_notes = []
-        latest_evidence = ""
+        investigation_summary = ""
         
         # Theo dõi tập hợp các tool call đã thực thi trong toàn bộ phiên hội thoại để chống gọi lặp lại
         executed_tool_calls: Set[Tuple[str, str]] = set()
@@ -327,18 +384,13 @@ Return an `<evidence>` block containing the reported diagnostic locations and me
             print(f"   - Raw Content trả về:\n{content if content else '[KHÔNG CÓ TEXT CONTENT]'}")
             print("-" * 60)
 
-            # Trích xuất thẻ evidence nếu có
-            evidence_match = re.search(r"<evidence>(.*?)</evidence>", content, re.DOTALL | re.IGNORECASE)
-            if evidence_match:
-                latest_evidence = evidence_match.group(1).strip()
-            elif "<evidence>" in content:
-                latest_evidence = content.split("<evidence>", 1)[1].strip()
-
             has_searched = any(func == "search_code" for func, _ in executed_tool_calls)
             has_read = any(func == "read_file" for func, _ in executed_tool_calls)
             is_done_signaled = any(phrase in content.upper() for phrase in ["ĐÃ ĐỦ", "ĐÃ ĐỦ BẰNG CHỨNG", "ĐÃ ĐỦ THÔNG TIN"])
 
             if is_done_signaled and has_read:
+                if not tool_calls and not self._detect_text_tool_calls(content, tools_map):
+                    investigation_summary = content.strip()
                 print("✅ [Reviewer] Điều tra viên báo đã đủ bằng chứng; kết thúc điều tra.")
                 break
 
@@ -366,10 +418,15 @@ Return an `<evidence>` block containing the reported diagnostic locations and me
 
                     call_signature = (func_name, self._normalize_tool_args(args))
 
+                    # Layer 2: Chặn tool call không hợp lệ trước khi thực thi
+                    intercepted = self._intercept_tool_call(func_name, args)
+                    if intercepted:
+                        print(f"🚫 [Reviewer] Tool call bị chặn: {func_name}({args})")
+                        tool_output = intercepted
                     # Kiểm tra xem tool và tham số này đã từng được gọi trong phiên hội thoại chưa
-                    if call_signature in executed_tool_calls:
+                    elif call_signature in executed_tool_calls:
                         print(f"⚠️ [Reviewer] Phát hiện gọi lặp tool/tham số đã từng gọi trong phiên: {func_name}({args}). Hủy thực thi.")
-                        tool_output = "Lỗi: Bạn đã từng gọi tool này với cùng tham số trước đó. Hãy xuất khối `<evidence>...</evidence> ĐÃ ĐỦ BẰNG CHỨNG` để kết thúc điều tra."
+                        tool_output = "Lỗi: Bạn đã từng gọi tool này với cùng tham số trước đó. Hãy dừng điều tra và trình bày tóm tắt kết quả bằng văn bản thường."
                     else:
                         executed_tool_calls.add(call_signature)
                         tool_output = self._execute_tool(tools_map, func_name, args)
@@ -394,8 +451,8 @@ Return an `<evidence>` block containing the reported diagnostic locations and me
                     messages.append({
                         "role": "user",
                         "content": (
-                            "Bạn đã có mã nguồn thực tế. Nếu đã đủ dữ kiện để đối chiếu nơi xảy ra lỗi và nơi định nghĩa liên quan, "
-                            "hãy xuất ngay khối `<evidence>...</evidence> ĐÃ ĐỦ BẰNG CHỨNG` và KHÔNG gọi thêm tool nào. "
+                            "Bạn vừa đọc mã nguồn. Nếu mã nguồn vừa đọc chứ định nghĩa symbol liên quan, "
+                            "hãy trình bày tóm tắt kết quả điều tra bằng văn bản thường và KHÔNG gọi thêm tool nào. "
                             "Nếu còn thiếu tệp đối ứng quan trọng, hãy gọi duy nhất 1 lần `read_file` cho tệp đó."
                         )
                     })
@@ -410,9 +467,16 @@ Return an `<evidence>` block containing the reported diagnostic locations and me
                 for func_name, args in text_tools:
                     call_signature = (func_name, self._normalize_tool_args(args))
 
+                    # Layer 2: Chặn tool call không hợp lệ
+                    intercepted = self._intercept_tool_call(func_name, args)
+                    if intercepted:
+                        print(f"🚫 [Reviewer] Text-tool call bị chặn: {func_name}({args})")
+                        batch_results.append(f"[TOOL BLOCKED for {func_name}({args})]:\n{intercepted}\n")
+                        continue
+
                     if call_signature in executed_tool_calls:
                         print(f"⚠️ [Reviewer] Phát hiện text-tool gọi lặp lại: {call_signature}. Hủy thực thi.")
-                        batch_results.append(f"Tool {func_name}({args}): Lỗi gọi lặp lại, đã từng thực thi. Hãy dừng gọi tool và xuất `<evidence>...</evidence> ĐÃ ĐỦ BẰNG CHỨNG`.")
+                        batch_results.append(f"Tool {func_name}({args}): Lỗi gọi lặp lại, đã từng thực thi. Hãy dừng điều tra và trình bày tóm tắt kết quả bằng văn bản thường.")
                         continue
 
                     executed_tool_calls.add(call_signature)
@@ -434,8 +498,8 @@ Return an `<evidence>` block containing the reported diagnostic locations and me
                     else:
                         next_instruction += (
                             "Bạn đã có mã nguồn thực tế từ công cụ. "
-                            "Nếu đã đủ dữ kiện để đối chiếu nơi xảy ra lỗi và nơi định nghĩa liên quan, "
-                            "hãy xuất ngay khối `<evidence>...</evidence> ĐÃ ĐỦ BẰNG CHỨNG` và KHÔNG gọi thêm tool nào. "
+                            "Nếu đã đủ mã nguồn để đối chiếu nơi xảy ra lỗi và nơi định nghĩa symbol gây lỗi, "
+                            "hãy trình bày tóm tắt kết quả điều tra bằng văn bản thường và KHÔNG gọi thêm tool nào. "
                             "Nếu còn thiếu tệp đối ứng quan trọng, hãy gọi duy nhất 1 lần `read_file` cho tệp đó."
                         )
 
@@ -465,26 +529,18 @@ Return an `<evidence>` block containing the reported diagnostic locations and me
         # =====================================================================
         # PHA 2: RA PHÁN QUYẾT & XUẤT JSON (KHÔNG DÙNG TOOLS)
         # =====================================================================
-        evidence_sections = []
-        if latest_evidence:
-            evidence_sections.append(
-                f"### [HỒ SƠ BẰNG CHỨNG HIỆN TRƯỜNG TỪ ĐIỀU TRA VIÊN (OBJECTIVE EVIDENCE)]:\n{latest_evidence}"
-            )
+        if investigation_summary:
+            gathered_context = f"### [KẾT QUẢ ĐIỀU TRA]:\n{investigation_summary}"
         elif investigation_notes:
-            evidence_sections.append(
-                "### [MÃ NGUỒN LIÊN QUAN ĐÃ THU THẬP TỪ TOOLS "
-                "(FALLBACK: KHÔNG CÓ KHỐI EVIDENCE)]:\n"
+            gathered_context = (
+                "### [MÃ NGUỒN LIÊN QUAN ĐÃ THU THẬP TỪ TOOLS]:\n"
                 + "\n---\n".join(investigation_notes)
             )
-
-        if evidence_sections:
-            gathered_context = "\n\n".join(evidence_sections)
         else:
             print("⚠️ [Reviewer] Pha 1 không thu thập được tool note. Fallback nạp toàn bộ code_overview.")
             gathered_context = code_overview
-
         verdict_prompt = f"""BẠN LÀ THẨM PHÁN TỐI CAO (CODE AUDITOR).
-Dưới đây là hồ sơ chứng cứ do điều tra viên thu thập từ hiện trường mã nguồn. Hãy đối chiếu khách quan với Yêu cầu bài toán gốc và Plan để đưa ra phán quyết cuối cùng:
+Dưới đây là kết quả điều tra từ mã nguồn. Hãy đối chiếu khách quan với Yêu cầu bài toán gốc và Plan để đưa ra phán quyết cuối cùng:
 
 ### YÊU CẦU BÀI TOÁN GỐC (SPECIFICATION - CHÂN LÝ TỐI CAO):
 {task_goal}
@@ -492,46 +548,30 @@ Dưới đây là hồ sơ chứng cứ do điều tra viên thu thập từ hi�
 ### [PLAN HIỆN TẠI (PLANNER)]:
 Kiến trúc: {plan.architecture_pattern}
 Ngôn ngữ: {language}
-### File contracts from the Planner:
-{plan_contract_summary}
-### Files currently existing in the project:
+CHÚ Ý: CÁC TỆP PLANNER vÀ CODER TẠO RA VÀ ĐANG TỒN TẠI TRONG DỰ ÁN:
 {existing_files_summary}
-</context>
 
 ### LOG LỖI SANDBOX:
 {clean_error_msg}
-Phán quyết phải giải thích lỗi thất bại đầu tiên trong log này. Mọi kết luận và hướng sửa phải truy nguyên được về log, evidence, file list, plan hoặc testcase; không đưa ra API, symbol, module path hay đề xuất mới không có căn cứ. Dùng rule trong skill ngôn ngữ để phân tích và chọn target.
 
-<testcase - testharness>
+<tệp kiểm thử - test_harness>
 {test_cases}
-</testcase - testharness>
+</tệp kiểm thử - test_harness>
 
 {gathered_context}
 
-### REVIEW SKILL — QUY TẮC PHÂN TÍCH CHO {language.upper()}:
-Áp dụng các rule sau khi chúng phù hợp với log và bằng chứng thực tế. Đây là hướng dẫn phân tích,
-không thay thế specification, plan, mã nguồn hoặc kết quả sandbox:
+### QUY TẮC CHO {language.upper()}:
 {verdict_skill}
-
-### SHARED REVIEW PROTOCOL:
-{common_skill}
-
-### Decision requirements:
-- Start from the first failure in the sandbox log. The stack trace's test frame is not itself proof that the test harness caused the failure.
-- Explain the exact failing symbol/construct using the matching source evidence. When the evidence says a name is used but not imported, check its definition and the failing file's imports before deciding.
-- Use only files and symbols present in the log, provided evidence, plan, source files, or test harness. Do not invent an unrelated exception, method, file, or sample implementation.
-- `failed_files` must contain only existing project files that need modification. Do not put a test harness in this list unless it is actually the primary failing artifact and is handled as TESTER.
-- Give a minimal correction that fixes the evidenced cause and preserves the existing plan/API. Do not offer speculative alternatives or generic instructions.
 </context>
 <output_format>
 {{
 "status": "REJECTED",
 "target": "PLANNER" | "CODER" | "TESTER",
 "error_category": "GLOBAL" | "LOCAL" | "TESTCASE",
-"failed_files": ["exact existing project file paths that need changes"],
-"root_cause": "the first evidenced failure, exact file/line/symbol, and why it fails",
-"instructions": "minimal change supported by the evidence; preserve planned interfaces",
-"audit_table": "evidence-to-conclusion mapping; mention secondary issues only when present in the log/evidence"
+"failed_files": ["chỉ các file chứa nguyên nhân gốc cần sửa, không gồm caller hoặc file chỉ được nhắc tới"],
+"root_cause": "nguyên nhân đã xác minh và vị trí phát sinh thực sự; phân biệt với nơi lỗi được gọi hoặc phát hiện",
+"instructions": "cách sửa tối thiểu, cụ thể, hợp lệ với code/API thực tế; nêu file và thay đổi cần thực hiện, không đưa ra hướng dẫn chung chung",
+"audit_table": "tóm tắt đối chiếu"
 }}
 </output_format>
 """
@@ -570,7 +610,13 @@ không thay thế specification, plan, mã nguồn hoặc kết quả sandbox:
                 elif isinstance(raw_failed_files, str):
                     failed_files_list = [f.strip().strip("`'\"") for f in raw_failed_files.split(",") if f.strip()]
 
-                valid_failed_files = [f for f in failed_files_list if f in files_dict]
+                if target_enum == ReviewTarget.TESTER:
+                    valid_failed_files = [
+                        f for f in failed_files_list 
+                        if f in files_dict or "test_harness" in f.lower() or "testharness" in f.lower()
+                    ]
+                else:
+                    valid_failed_files = [f for f in failed_files_list if f in files_dict]
 
                 response_category = str(json_obj.get("error_category", cat)).upper().strip()
                 if response_category not in {"GLOBAL", "LOCAL", "TESTCASE", "NONE"}:

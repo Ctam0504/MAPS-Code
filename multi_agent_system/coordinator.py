@@ -437,10 +437,9 @@ class MultiAgentCoordinator:
         # ----------------------------------------------------------------------
         if "tester" in self.enabled_agents:
             print("\n🧪 [BƯỚC 3] Khởi chạy Tester Agent sinh Test Harness...")
-            tester_input_files = self.memory.get_tester_files(self.current_files)
             self.current_tests = self.tester.generate_tests(
                 task_goal=task_prompt,
-                files_dict=tester_input_files,
+                input_folder=input_folder,
                 target_language=lang
             )
         else:
@@ -656,10 +655,9 @@ class MultiAgentCoordinator:
             elif decision.target == ReviewTarget.TESTER and "tester" in self.enabled_agents:
                 print("   🛠️ [Điều chỉnh] Tester Agent đang sửa lại kịch bản kiểm thử...")
                 adjustment_logs.append("Tester Agent đang sửa lại kịch bản kiểm thử...")
-                tester_fix_files = self.memory.get_tester_files(self.current_files)
                 self.current_tests = self.tester.fix_tests(
                     task_goal=task_prompt,
-                    files_dict=tester_fix_files,
+                    input_folder=input_folder,
                     current_tests=self.current_tests,
                     target_language=lang,
                     reviewer_instructions=decision.instructions,

@@ -11,7 +11,8 @@ from .base_agent import BaseAgent
 from .. import config
 import re
 import os
-
+from ..rag.ast_extractor import parse_codebase_to_graph_and_chunks
+from ..rag.rag_pipeline import GraphRAGRetriever
 class TesterAgent(BaseAgent):
     def __init__(
         self,
@@ -23,7 +24,6 @@ class TesterAgent(BaseAgent):
             base_url=base_url,
             temperature=0.2
         )
-
     def _get_test_format_instructions(self, target_language: str) -> str:
         lang_lower = target_language.lower()
         if lang_lower == "python":
@@ -88,21 +88,29 @@ MU_TEST_SUITE(test_suite) {
 
 MU_RUN_SUITE(test_suite)
 """
-
+    def _retrieve_graphrag_context(self, folder: Optional[str]) -> str:
+        if not folder or not os.path.exists(folder):
+            return ""
+        try:
+            graph, _ = parse_codebase_to_graph_and_chunks(folder)
+            if graph.number_of_nodes() == 0:
+                return ""
+            return GraphRAGRetriever.get_codebase_manifest(graph)
+        except Exception as e:
+            print(f"⚠️ [Planner] Bỏ qua trích xuất GraphRAG do lỗi: {e}")
+            return ""
     def generate_tests(
         self,
         task_goal: str,
-        files_dict: Dict[str, str],
+        input_folder: Optional[str],
         target_language: str,
         history_feedback: str = ""
     ) -> str:
         """
         Sinh mã nguồn Test Harness kiểm thử toàn bộ hệ thống đa tệp.
         """
-        code_overview = ""
-        for filepath, content in files_dict.items():
-            code_overview += f"\n--- TỆP: `{filepath}` ---\n```{target_language}\n{content}\n```\n"
-
+        graphrag_context = self._retrieve_graphrag_context(input_folder)
+        rag_section = f"\n### [Thông tin folder tập tin hiện tại]:\n{graphrag_context}\n" if graphrag_context else ""
         history_section = f"\n### [LỊCH SỬ PHẢN HỒI]:\n{history_feedback}\n" if history_feedback else ""
         fmt_instruction = self._get_test_format_instructions(target_language)
 
@@ -113,7 +121,7 @@ Nhiệm vụ: Viết bộ kịch bản kiểm thử (Test Suite) toàn diện ch
 {task_goal}
 
 ### [MÃ NGUỒN CÁC TỆP ĐÃ SINH]:
-{code_overview}
+{rag_section}
 {history_section}
 ### [QUY TẮC KIỂM THỬ]:
 1. Kiểm tra các chức năng chính và các trường hợp biên (edge cases).
@@ -135,7 +143,7 @@ CHỈ TRẢ VỀ DUY NHẤT MÃ KIỂM THỬ trong khối ```{target_language} .
     def fix_tests(
         self,
         task_goal: str,
-        files_dict: Dict[str, str],
+        input_folder: Optional[str],
         current_tests: str,
         target_language: str,
         reviewer_instructions: str,
@@ -144,10 +152,8 @@ CHỈ TRẢ VỀ DUY NHẤT MÃ KIỂM THỬ trong khối ```{target_language} .
         """
         Sửa đổi lại testcase khi Reviewer xác định lỗi do Tester viết sai assertion hoặc điều kiện.
         """
-        code_overview = ""
-        for filepath, content in files_dict.items():
-            code_overview += f"\n--- TỆP: `{filepath}` ---\n```{target_language}\n{content}\n```\n"
-
+        graphrag_context = self._retrieve_graphrag_context(input_folder)
+        rag_section = f"\n### [Thông tin folder tập tin hiện tại]:\n{graphrag_context}\n" if graphrag_context else ""
         fmt_instruction = self._get_test_format_instructions(target_language)
 
         prompt = f"""BẠN LÀ QA ENGINEER ({target_language.upper()}).
@@ -157,7 +163,7 @@ Testcase của bạn đã gặp **LỖI TESTCASE (TESTER FAULTY)**: Reviewer xá
 {task_goal}
 
 ### [MÃ NGUỒN DỰ ÁN]:
-{code_overview}
+{rag_section}
 
 ### [TESTCASE HIỆN TẠI]:
 ```{target_language}
@@ -173,13 +179,13 @@ Testcase của bạn đã gặp **LỖI TESTCASE (TESTER FAULTY)**: Reviewer xá
 {fmt_instruction}
 
 ### [NHIỆM VỤ]:
-1. Phân tích chỉ thị của Reviewer và chỉ ra chính xác các test assertion / điều kiện cần sửa.
+1. Phân tích chỉ thị của Reviewer và chỉ ra chính xác các test assertion / điều kiện/ cú pháp cần sửa cần sửa.
 2. Tuân thủ tuyệt đối chỉ thị sửa lỗi.
 3. Viết lại bộ testcase hoàn chỉnh đã khắc phục toàn bộ lỗi trên.
 ### [NGỮ CẢNH]:
 1. Mã kiểm thử sinh ra nằm ở thư mục gốc của dự án. Cùng cấp với filepath.
 2. Dựa vào ngữ cảnh sinh ra import/include chính xác.
-CHỈ TRẢ VỀ MÃ KIỂM THỬ trong khối ```{target_language} ... ```. Không giải thích gì thêm.
+CHỈ TRẢ VỀ MÃ KIỂM THỬ ĐÃ SỬA LỖI trong khối ```{target_language} ... ```. Không giải thích gì thêm.
 """
 
         # Ensure clean_code is defined even if LLM returns no code block
@@ -202,10 +208,6 @@ CHỈ TRẢ VỀ MÃ KIỂM THỬ trong khối ```{target_language} ... ```. Kh�
                     continue
                 # Search for the header file in the workspace files_dict
                 matched_path = None
-                for filepath in files_dict.keys():
-                    if os.path.basename(filepath) == inc:
-                        matched_path = filepath
-                        break
                 if matched_path:
                     # Use the workspace-relative path (e.g., "c/calculator.h")
                     rel_path = matched_path.replace(os.path.sep, "/")
