@@ -11,8 +11,7 @@ from .base_agent import BaseAgent
 from .. import config
 import re
 import os
-from ..rag.ast_extractor import parse_codebase_to_graph_and_chunks
-from ..rag.rag_pipeline import GraphRAGRetriever
+
 class TesterAgent(BaseAgent):
     def __init__(
         self,
@@ -88,29 +87,19 @@ MU_TEST_SUITE(test_suite) {
 
 MU_RUN_SUITE(test_suite)
 """
-    def _retrieve_graphrag_context(self, folder: Optional[str]) -> str:
-        if not folder or not os.path.exists(folder):
-            return ""
-        try:
-            graph, _ = parse_codebase_to_graph_and_chunks(folder)
-            if graph.number_of_nodes() == 0:
-                return ""
-            return GraphRAGRetriever.get_codebase_manifest(graph)
-        except Exception as e:
-            print(f"⚠️ [Planner] Bỏ qua trích xuất GraphRAG do lỗi: {e}")
-            return ""
     def generate_tests(
         self,
         task_goal: str,
-        input_folder: Optional[str],
+        files_dict: Dict[str, str],
         target_language: str,
         history_feedback: str = ""
     ) -> str:
         """
         Sinh mã nguồn Test Harness kiểm thử toàn bộ hệ thống đa tệp.
         """
-        graphrag_context = self._retrieve_graphrag_context(input_folder)
-        rag_section = f"\n### [Thông tin folder tập tin hiện tại]:\n{graphrag_context}\n" if graphrag_context else ""
+        code_overview = ""
+        for filepath, content in files_dict.items():
+            code_overview += f"\n--- FILE: `{filepath}` ---\n```{target_language}\n{content}\n```\n"
         history_section = f"\n### [LỊCH SỬ PHẢN HỒI]:\n{history_feedback}\n" if history_feedback else ""
         fmt_instruction = self._get_test_format_instructions(target_language)
 
@@ -121,7 +110,7 @@ Nhiệm vụ: Viết bộ kịch bản kiểm thử (Test Suite) toàn diện ch
 {task_goal}
 
 ### [MÃ NGUỒN CÁC TỆP ĐÃ SINH]:
-{rag_section}
+{code_overview}
 {history_section}
 ### [QUY TẮC KIỂM THỬ]:
 1. Kiểm tra các chức năng chính và các trường hợp biên (edge cases).
@@ -143,7 +132,7 @@ CHỈ TRẢ VỀ DUY NHẤT MÃ KIỂM THỬ trong khối ```{target_language} .
     def fix_tests(
         self,
         task_goal: str,
-        input_folder: Optional[str],
+        files_dict: Dict[str, str],
         current_tests: str,
         target_language: str,
         reviewer_instructions: str,
@@ -152,8 +141,9 @@ CHỈ TRẢ VỀ DUY NHẤT MÃ KIỂM THỬ trong khối ```{target_language} .
         """
         Sửa đổi lại testcase khi Reviewer xác định lỗi do Tester viết sai assertion hoặc điều kiện.
         """
-        graphrag_context = self._retrieve_graphrag_context(input_folder)
-        rag_section = f"\n### [Thông tin folder tập tin hiện tại]:\n{graphrag_context}\n" if graphrag_context else ""
+        code_overview = ""
+        for filepath, content in files_dict.items():
+            code_overview += f"\n--- FILE: `{filepath}` ---\n```{target_language}\n{content}\n```\n"
         fmt_instruction = self._get_test_format_instructions(target_language)
 
         prompt = f"""BẠN LÀ QA ENGINEER ({target_language.upper()}).
@@ -163,7 +153,7 @@ Testcase của bạn đã gặp **LỖI TESTCASE (TESTER FAULTY)**: Reviewer xá
 {task_goal}
 
 ### [MÃ NGUỒN DỰ ÁN]:
-{rag_section}
+{code_overview}
 
 ### [TESTCASE HIỆN TẠI]:
 ```{target_language}

@@ -27,7 +27,7 @@ class CoderAgent(BaseAgent):
         lang_lower = lang.lower()
         if lang_lower == "java":
             return """
-QUY TẮC BẮT BUỘC CHO JAVA:
+QUY TẮC BẮT BUỘC CHO JAVA (PURE JDK):
 1. File phải có khai báo package ở dòng đầu tiên nếu nằm trong thư mục con (ví dụ: file `models/User.java` phải có `package models;`).
 2. Tên public class PHẢI TRÙNG KHỚP 100% với tên file (ví dụ `public class User` cho file `User.java`).
 3. BẮT BUỘC IMPORT ĐẦY ĐỦ các class thuộc các package khác (Ví dụ: dùng `User`, `Ticket` trong controllers hay services thì PHẢI có `import models.User;` hoặc `import models.*;`). TUYỆT ĐỐI KHÔNG ĐỂ THIẾU IMPORT.

@@ -12,6 +12,7 @@
 - Nhiệm vụ duy nhất là thu thập sự thật khách quan (facts) từ mã nguồn thực tế tại điểm lỗi và điểm định nghĩa đối ứng.
 - Đọc tối đa 2-3 tệp liên quan trực tiếp, không phán xét trách nhiệm, không đưa ra kết luận sớm ở Pha 1.
 - Xác định đúng vị trí lỗi: Phân biệt rõ ràng giữa tệp kiểm thử và tệp mã nguồn dự án theo đúng log lỗi Sandbox.
+- Tệp kiểm thử (testharness.py) chỉ dùng để kiểm tra mã nguồn, không thuộc về mã nguồn của yêu cầu bài toán. Do đó, nếu tệp kiểm thử đưa ra các hàm hoặc assert vô lý so với yêu cầu bài toán thì lỗi ở tệp kiểm thử.
 - Không đoán nội dung mã nguồn, phải đọc mã nguồn tìm sự thật.
 
 ## Phase 2: Verdict rules
@@ -39,4 +40,5 @@
     + Nếu Plan đã có đề cập mà mã nguồn viết thiếu hoặc sai cú pháp -> Phán quyết: **CODER (LOCAL)**.
     + Chỉ khi Plan thiếu hẳn thành phần mà bài toán yêu cầu -> Phán quyết: **PLANNER (GLOBAL)**.
   - **Lỗi runtime assert thất bại**:
-    + Phân định CODER (mã nguồn xử lý sai) hay TESTER (assert vô lý so với đặc tả).
+    + mã nguồn xử lý sai yêu cầu bài toán --> Phán quyết: **CODER (LOCAL)** 
+    + Testharness đưa ra các assert hoặc testcase vô lý so với yêu cầu bài toán --> phán quyết:  **TESTER (TESTCASE)**

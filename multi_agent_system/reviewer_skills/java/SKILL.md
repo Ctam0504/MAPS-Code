@@ -12,13 +12,12 @@
 - Nhiệm vụ duy nhất là thu thập sự thật khách quan (facts) từ mã nguồn thực tế tại điểm lỗi và điểm định nghĩa đối ứng.
 - Đọc tối đa 2-3 tệp liên quan trực tiếp, không đưa ra kết luận sớm ở Pha 1.
 - Xác định đúng vị trí lỗi: Phân biệt rõ ràng giữa tệp kiểm thử và tệp mã nguồn dự án theo đúng log lỗi Sandbox.
+- Tệp kiểm thử (testharness.java) chỉ dùng để kiểm tra mã nguồn, không thuộc về mã nguồn của yêu cầu bài toán. Do đó, nếu tệp kiểm thử đưa ra các hàm hoặc assert vô lý so với yêu cầu bài toán thì lỗi ở tệp kiểm thử.
 - Không đoán nội dung mã nguồn, phải đọc mã nguồn tìm sự thật.
 ### ĐIỀU TRA CHECKED EXCEPTION:
-- Với lỗi liên quan đến `try-catch` hoặc `throws`, bắt đầu từ đúng diagnostic và vị trí compiler nêu; không quét toàn project.
-- Với `exception X is never thrown in body of corresponding try statement`, kiểm tra chữ ký compile-time của các lời gọi trong `try`, rồi lần qua wrapper/interface trực tiếp để tìm nơi exception bị bắt, bị nuốt hoặc được khai báo `throws`.
-- Với `unreported exception X`, kiểm tra lời gọi gây lỗi và xác định caller thiếu `catch` hay `throws`.
-- Kiểm tra yêu cầu/plan để biết tầng nào dự kiến xử lý exception. Chỉ đọc các file cần thiết để xác nhận luồng và hợp đồng.
-- Tóm tắt điều tra phải ghi rõ diagnostic, các chữ ký liên quan và nơi exception được xử lý/không được propagate. Phase này chỉ thu thập facts, chưa đề xuất sửa.
+- Phân biệt các lỗi:
+  - `unreported exception X; must be caught or declared to be thrown`: lôi `X`, nhưng method hiện tại chưa catch hoặc khai báo `throws`.
+  - `exception X is never thrown in body of corresponding try statement`: lỗi nằm trong khối `try` có thể ném `X` theo chữ ký compile-time. Kiểm tra từng lời gọi trong khối `try` có nuốt exception hay không.
 
 ## Phase 2: Verdict rules
 ### NGUYÊN TẮC PHÂN CHIA TRÁCH NHIỆM TỆP:
@@ -30,10 +29,10 @@
 - Tuân thủ Cây quyết định phân định trách nhiệm để chọn đúng 1 Target (CODER, PLANNER hoặc TESTER).
 - Hướng dẫn sửa đổi (instructions) phải là thay đổi tối thiểu, cụ thể, bảo tồn các interface và hợp đồng kiến trúc đã có.
 ### NGUYÊN TẮC XỬ LÝ LỖI TẠI TỆP KIỂM THỬ (TEST HARNESS):
-- Nếu log lỗi chỉ ra lỗi cú pháp, cấu trúc câu lệnh, hoặc import/include sai trực tiếp tại tệp kiểm thử (TestHarness.java):
+- Nếu log lỗi chỉ ra lỗi cú pháp, cấu trúc câu lệnh, hoặc import/include sai trực tiếp tại tệp kiểm thử:
   -> **100% LÀ LỖI CỦA TESTER (TESTCASE)**.
   -> NGHIÊM CẤM gán cho PLANNER hay CODER!
-- Khi tệp kiểm thử bị lỗi, **LỖI HOẶC LÀ CODER HOẶC LÀ TESTER**.
+- Khi tệp kiểm thử bị lỗi, **TUYỆT ĐỐI LOẠI TRỪ PLANNER**.
 - **Quy tắc phân định trách nhiệm**:
   - **Lỗi tại tệp kiểm thử**:
     + Nếu tệp kiểm thử tự bị lỗi cú pháp hoặc import sai hoặc thiếu -> Phán quyết: **TESTER (TESTCASE)**.
@@ -42,15 +41,13 @@
     + **TUYỆT ĐỐI KHÔNG gán PLANNER** khi lỗi xảy ra trong tệp kiểm thử.
   - **Lỗi tại tệp mã nguồn dự án**:
     + 100% thuộc về CODER hoặc PLANNER, nghiêm cấm đổ lỗi cho TESTER.
-    + Nếu Plan đã có đề cập mà mã nguồn viết thiếu hoặc sai cú pháp, bịa đường dẫn không có trong plan -> Phán quyết: **CODER (LOCAL)**.
+    + Nếu Plan đã có đề cập mà mã nguồn viết thiếu hoặc sai cú pháp -> Phán quyết: **CODER (LOCAL)**.
     + Chỉ khi Plan thiếu hẳn thành phần mà bài toán yêu cầu -> Phán quyết: **PLANNER (GLOBAL)**.
   - **Lỗi runtime assert thất bại**:
-    + Phân định CODER (mã nguồn xử lý sai) hay TESTER (assert vô lý so với đặc tả).
+    + mã nguồn xử lý sai yêu cầu bài toán --> Phán quyết: **CODER (LOCAL)** 
+    + Testharness đưa ra các assert hoặc testcase vô lý so với yêu cầu bài toán --> phán quyết:  **TESTER (TESTCASE)**
 ### VERDICT CHO CHECKED EXCEPTION:
-- Dựa trên evidence từ Phase 1 và yêu cầu/plan để chọn một hướng sửa nhất quán:
-  - Nếu contract yêu cầu caller xử lý `X`, giữ `catch` tại caller và cho các wrapper trung gian khai báo `throws X` để propagate exception.
-  - Nếu contract yêu cầu wrapper xử lý `X`, wrapper bắt exception tại đó; caller không bắt `X` nếu nó không được propagate.
-- Không xóa `catch` chỉ để làm hết lỗi `exception X is never thrown`; không thêm `throw new X(...)` tùy tiện để làm `catch` reachable.
-- Nếu đổi chữ ký `throws`, xét các caller bị ảnh hưởng và chỉ thị cập nhật chúng nhất quán.
-- Nếu không có căn cứ xác định tầng xử lý trong yêu cầu/plan/hợp đồng hiện có, nêu rõ chưa đủ căn cứ; không tự chọn hướng sửa hoặc quy lỗi cho Planner.
+- Nếu contract yêu cầu chính wrapper xử lý `X`, wrapper catch tại đó; caller chỉ được catch `X` nếu một lời gọi khác trong đúng khối `try` cũng khai báo ném `X`.
+- Với `exception X is never thrown`, không xóa catch mù quáng. Kiểm tra toàn bộ lời gọi trong đúng khối `try` theo chữ ký compile-time; sửa nơi exception bị chặn hoặc điều chỉnh đúng vị trí catch theo contract. Không thêm `throw new X(...)` giả tạo chỉ để compiler chấp nhận catch.
+- Với `unreported exception X`, sửa tại method chứa lời gọi bị báo: thêm `throws X` nếu phải propagate theo contract, hoặc catch và xử lý tại đó nếu đây là tầng xử lý được yêu cầu. Khi đổi `throws`, kiểm tra tiếp caller trực tiếp; tiếp tục truyền lên cho tới đúng tầng xử lý.
 

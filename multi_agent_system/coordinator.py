@@ -439,7 +439,7 @@ class MultiAgentCoordinator:
             print("\n🧪 [BƯỚC 3] Khởi chạy Tester Agent sinh Test Harness...")
             self.current_tests = self.tester.generate_tests(
                 task_goal=task_prompt,
-                input_folder=input_folder,
+                files_dict=self.current_files,
                 target_language=lang
             )
         else:
@@ -657,7 +657,7 @@ class MultiAgentCoordinator:
                 adjustment_logs.append("Tester Agent đang sửa lại kịch bản kiểm thử...")
                 self.current_tests = self.tester.fix_tests(
                     task_goal=task_prompt,
-                    input_folder=input_folder,
+                    files_dict=self.current_files,
                     current_tests=self.current_tests,
                     target_language=lang,
                     reviewer_instructions=decision.instructions,
