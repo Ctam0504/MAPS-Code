@@ -565,13 +565,11 @@ CHÚ Ý: CÁC TỆP PLANNER vÀ CODER TẠO RA VÀ ĐANG TỒN TẠI TRONG DỰ
 </context>
 <output_format>
 {{
-"status": "REJECTED",
 "target": "PLANNER" | "CODER" | "TESTER",
 "error_category": "GLOBAL" | "LOCAL" | "TESTCASE",
 "failed_files": ["chỉ các file chứa nguyên nhân gốc cần sửa, không gồm caller hoặc file chỉ được nhắc tới"],
 "root_cause": "nguyên nhân đã xác minh và vị trí phát sinh thực sự; phân biệt với nơi lỗi được gọi hoặc phát hiện",
-"instructions": "cách sửa tối thiểu, cụ thể, hợp lệ với code/API thực tế; nêu file và thay đổi cần thực hiện, không đưa ra hướng dẫn chung chung",
-"audit_table": "tóm tắt đối chiếu"
+"instructions": "cách sửa tối thiểu, cụ thể, hợp lệ với code/API thực tế; nêu file và thay đổi cần thực hiện, không đưa ra hướng dẫn chung chung"
 }}
 </output_format>
 """

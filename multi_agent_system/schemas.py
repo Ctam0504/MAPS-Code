@@ -97,14 +97,12 @@ class ReviewTarget(str, Enum):
 class ReviewDecision(BaseModel):
     model_config = ConfigDict(extra="allow")
 
-    status: str = Field(default="REJECTED", description="'PASSED' hoặc 'REJECTED'")
     target: ReviewTarget = Field(..., description="Agent chịu trách nhiệm: PLANNER, CODER hoặc TESTER")
     error_category: str = Field(default="LOCAL", description="'GLOBAL', 'LOCAL', 'TESTCASE' hoặc 'NONE'")
     failed_file: Optional[str] = Field(default=None, description="Tên file đơn lẻ có lỗi (giữ lại để tương thích)")
     failed_files: List[str] = Field(default_factory=list, description="Danh sách các file bị phát hiện lỗi")
     root_cause: str = Field(..., description="Nguyên nhân cốt lõi gây ra lỗi")
     instructions: str = Field(..., description="Chỉ thị sửa đổi cụ thể, chi tiết gửi tới Target Agent")
-    audit_table: Optional[Any] = Field(default="", description="Bảng phân tích logic audit (nếu có)")
 
 # ==============================================================================
 # 5. SCHEMA NHẬT KÝ VÒNG LẶP (COORDINATOR LOG)

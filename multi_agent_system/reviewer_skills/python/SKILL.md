@@ -25,10 +25,6 @@
 - Tuân thủ Cây quyết định phân định trách nhiệm để chọn đúng 1 Target (CODER, PLANNER hoặc TESTER).
 - Hướng dẫn sửa đổi (instructions) phải là thay đổi tối thiểu, cụ thể, bảo tồn các interface và hợp đồng kiến trúc đã có.
 ### NGUYÊN TẮC XỬ LÝ LỖI TẠI TỆP KIỂM THỬ (TEST HARNESS):
-- Nếu log lỗi chỉ ra lỗi cú pháp, cấu trúc câu lệnh, hoặc import/include sai trực tiếp tại tệp kiểm thử:
-  -> **100% LÀ LỖI CỦA TESTER (TESTCASE)**.
-  -> NGHIÊM CẤM gán cho PLANNER hay CODER!
-- Khi tệp kiểm thử bị lỗi, **TUYỆT ĐỐI LOẠI TRỪ PLANNER**.
 - **Quy tắc phân định trách nhiệm**:
   - **Lỗi tại tệp kiểm thử**:
     + Nếu tệp kiểm thử tự bị lỗi cú pháp hoặc import sai hoặc thiếu -> Phán quyết: **TESTER (TESTCASE)**.

@@ -1,7 +1,7 @@
 # Java Reviewer Skill
 
 ## Phase 1: Investigation guidance
-
+- Dựa vào yêu cầu bài toán làm chân lý. Không gợi ý thay đổi nếu vi phạm yêu cầu bài toán.
 - **Quy trình điều tra hiện trường**:
   - Sử dụng `read_file` tệp gây ra lỗi trong mã nguồn đầu tiên (bỏ qua file testharness.java).
   - Nếu tệp bị lỗi gọi symbol/kiểu dữ liệu từ tệp khác nhưng bị lỗi chưa tìm thấy: Dùng `search_code` để tìm tệp chứa định nghĩa đối ứng để kiểm tra khai báo thực tế.
@@ -16,8 +16,7 @@
 - Không đoán nội dung mã nguồn, phải đọc mã nguồn tìm sự thật.
 ### ĐIỀU TRA CHECKED EXCEPTION:
 - Phân biệt các lỗi:
-  - `unreported exception X; must be caught or declared to be thrown`: lôi `X`, nhưng method hiện tại chưa catch hoặc khai báo `throws`.
-  - `exception X is never thrown in body of corresponding try statement`: lỗi nằm trong khối `try` có thể ném `X` theo chữ ký compile-time. Kiểm tra từng lời gọi trong khối `try` có nuốt exception hay không.
+  - `exception X is never thrown in body of corresponding try statement`: Dùng search_code tìm tệp chứa định nghĩa các hàm trong khối `try` sau đó đọc từng tệp kiểm tra xem các tệp định nghĩa hàm có throw exception tương ứng hay không. Nếu không throw thì lỗi là do tệp định nghĩa hàm.
 
 ## Phase 2: Verdict rules
 ### NGUYÊN TẮC PHÂN CHIA TRÁCH NHIỆM TỆP:
@@ -48,6 +47,5 @@
     + Testharness đưa ra các assert hoặc testcase vô lý so với yêu cầu bài toán --> phán quyết:  **TESTER (TESTCASE)**
 ### VERDICT CHO CHECKED EXCEPTION:
 - Nếu contract yêu cầu chính wrapper xử lý `X`, wrapper catch tại đó; caller chỉ được catch `X` nếu một lời gọi khác trong đúng khối `try` cũng khai báo ném `X`.
-- Với `exception X is never thrown`, không xóa catch mù quáng. Kiểm tra toàn bộ lời gọi trong đúng khối `try` theo chữ ký compile-time; sửa nơi exception bị chặn hoặc điều chỉnh đúng vị trí catch theo contract. Không thêm `throw new X(...)` giả tạo chỉ để compiler chấp nhận catch.
-- Với `unreported exception X`, sửa tại method chứa lời gọi bị báo: thêm `throws X` nếu phải propagate theo contract, hoặc catch và xử lý tại đó nếu đây là tầng xử lý được yêu cầu. Khi đổi `throws`, kiểm tra tiếp caller trực tiếp; tiếp tục truyền lên cho tới đúng tầng xử lý.
+- Với `exception X is never thrown`. Kiểm tra toàn bộ lời gọi trong khối `try` trong tệp phát sinh lỗi vì tệp định nghĩa hàm được chứa trong try đã không throw exception cho catch.
 

@@ -14,14 +14,16 @@
 - Xác định đúng vị trí lỗi: Phân biệt rõ ràng giữa tệp kiểm thử và tệp mã nguồn dự án theo đúng log lỗi Sandbox.
 - Tệp kiểm thử (testharness.c) chỉ dùng để kiểm tra mã nguồn, không thuộc về mã nguồn của yêu cầu bài toán. Do đó, nếu tệp kiểm thử đưa ra các hàm hoặc assert vô lý so với yêu cầu bài toán thì lỗi ở tệp kiểm thử.
 - Không đoán nội dung mã nguồn, phải đọc mã nguồn tìm sự thật.
+- Không yêu cầu tạo, sửa hay xóa tệp nếu vi phạm yêu cầu bài toán.
 ### ĐIỀU TRA UNDECLARED SYMBOL:
-- Ngôn ngữ C có cấu trúc .c là nơi định nghĩa hàm, biến, struct, typedef; .h là nơi khai báo các symbol đó. Nếu một hàm bị undeclared, kiểm tra xem tệp .c chứa định nghĩa có include đúng .h chưa, và tệp .h được include đó có khai báo các symbol đó chưa.
+- Ngôn ngữ C có cấu trúc .c là nơi định nghĩa hàm, biến, struct, typedef; .h là nơi khai báo các symbol đó. Khi include thì tệp .h luôn là nơi được gọi, do đó nếu một hàm bị undeclared, kiểm tra xem tệp .c chứa định nghĩa có include đúng .h chưa, và tệp .h được include đó có khai báo các symbol đó chưa.
+
 ## Phase 2: Verdict rules
 ### NGUYÊN TẮC PHÂN CHIA TRÁCH NHIỆM TỆP:
 - Tệp kiểm thử dùng để kiểm tra mã nguồn (TestHarness.c): Thuộc về **Tester**.
 - Tất cả các tệp mã nguồn dự án còn lại: Thuộc về **Coder** và **Planner**.
 ### NGUYÊN TẮC XỬ LÝ LỖI TẠI TỆP KIỂM THỬ (TEST HARNESS):
-- Nếu log lỗi chỉ ra lỗi cú pháp, cấu trúc câu lệnh, hoặc import/include sai trực tiếp tại tệp kiểm thử:
+- Nếu log lỗi chỉ ra lỗi cú pháp, cấu trúc câu lệnh, hoặc include sai trực tiếp tại tệp kiểm thử:
   -> **100% LÀ LỖI CỦA TESTER (TESTCASE)**.
   -> NGHIÊM CẤM gán cho PLANNER hay CODER!
 - Khi tệp kiểm thử bị lỗi, **TUYỆT ĐỐI LOẠI TRỪ PLANNER**.
