@@ -1,12 +1,13 @@
 """
 multi_agent_system.agents.coder_agent
 ====================================
-Agent Coder: Tiếp nhận task từ Planner, sinh mã nguồn từng tệp tin
+Agent Coder: Tiếp nhận task trực tiếp hoặc từ Planner, sinh mã nguồn từng tệp tin
 dựa trên ngôn ngữ đích (Python, Java, C), tích lũy ngữ cảnh các tệp đã tạo,
 và tiến hành sửa đổi mã nguồn khi có chỉ thị lỗi Local từ Reviewer.
 """
 
 from typing import Dict, Optional, List, Any
+import os
 from .base_agent import BaseAgent
 from ..schemas import FileSpec, MultiFilePlan
 from .. import config
@@ -202,6 +203,83 @@ Nhiệm vụ: Viết mã nguồn HOÀN CHỈNH cho tệp tin: `{file_spec.filepa
                 print(f"   📁 [Coder] Đã ghi tệp: {full_path}")
 
         return created_files
+
+    def generate_from_task(
+        self,
+        task_goal: str,
+        target_language: Optional[str] = None,
+        initial_files: Optional[Dict[str, str]] = None,
+    ) -> Dict[str, str]:
+        """Generate source files directly from the task, without a Planner plan."""
+        selected_language = (target_language or "").strip().lower()
+        if selected_language and selected_language not in {"python", "java", "c"}:
+            raise ValueError(f"Ngôn ngữ không được hỗ trợ: {target_language!r}.")
+
+        existing_sources = ""
+        for filepath, content in (initial_files or {}).items():
+            file_language = os.path.splitext(filepath)[1].lstrip(".") or "text"
+            existing_sources += (
+                f"\n--- FILE: `{filepath}` ---\n"
+                f"```{file_language}\n{content}\n```\n"
+            )
+
+        if selected_language:
+            language_instructions = (
+                f"Ngôn ngữ đích: {selected_language.upper()}\n"
+                f"{self._get_language_rules(selected_language)}"
+            )
+        else:
+            language_instructions = """Không có target language được chỉ định. Hãy tự chọn Python, Java hoặc C phù hợp nhất với yêu cầu.
+Nếu đề bài yêu cầu rõ một ngôn ngữ thì dùng ngôn ngữ đó. Đặt phần mở rộng tệp tương ứng (.py, .java, .c hoặc .h).
+"""
+
+        prompt = f"""BẠN LÀ SENIOR SOFTWARE ENGINEER CHUYÊN NGHIỆP.
+Nhiệm vụ của bạn là trực tiếp giải quyết yêu cầu và tự quyết định cấu trúc tệp cần thiết.
+Không chờ hoặc tạo kế hoạch từ Planner. Trả về toàn bộ nội dung của các tệp cần tạo hoặc sửa.
+
+### [YÊU CẦU BÀI TOÁN]:
+{task_goal}
+
+### [NGÔN NGỮ VÀ QUY TẮC]:
+{language_instructions}
+
+### [MÃ NGUỒN ĐÃ CÓ (NẾU CÓ)]:
+{existing_sources or "Không có mã nguồn đầu vào."}
+
+### [ĐỊNH DẠNG ĐẦU RA]:
+Chỉ trả về JSON object theo cấu trúc:
+{{
+  "files": {{
+    "relative/path/to/source_file.ext": "toàn bộ mã nguồn của tệp"
+  }}
+}}
+Dùng phần mở rộng tương ứng với ngôn ngữ đã chọn. Chỉ đưa vào `files` các tệp cần tạo hoặc thay đổi.
+Không trả về plan, giải thích, Markdown hay placeholder.
+"""
+        raw_response = self.call_llm(prompt, format_json=True)
+        response = self.extract_json_object(raw_response)
+        raw_files = response.get("files") if response else None
+        if not isinstance(raw_files, dict) or not raw_files:
+            raise ValueError("Coder direct mode không trả về JSON hợp lệ có danh sách 'files'.")
+
+        generated_files: Dict[str, str] = {}
+        for raw_path, content in raw_files.items():
+            if not isinstance(raw_path, str) or not isinstance(content, str) or not content.strip():
+                raise ValueError("Coder direct mode trả về filepath hoặc nội dung tệp không hợp lệ.")
+
+            filepath = raw_path.strip().replace("\\", "/")
+            path_parts = filepath.split("/")
+            if (
+                not filepath
+                or filepath.startswith("/")
+                or ":" in filepath
+                or any(part in {"", ".", ".."} for part in path_parts)
+            ):
+                raise ValueError(f"Coder direct mode trả về filepath không an toàn: {raw_path!r}.")
+
+            generated_files[filepath] = content
+
+        return generated_files
 
     def fix_file(
         self,

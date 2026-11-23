@@ -23,8 +23,13 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 from multi_agent_system.coordinator import MultiAgentCoordinator
 from multi_agent_system import config
 
-DEFAULT_SYSTEM_MODE = "planner-coder-tester-reviewer"
+DEFAULT_SYSTEM_MODE = "coder"
 SYSTEM_MODES = {
+    "coder": {
+        "enabled_agents": ["coder"],
+        "reviewer_tools": False,
+        "reviewer_skills": False,
+    },
     "planner-coder": {
         "enabled_agents": ["planner", "coder"],
         "reviewer_tools": False,
@@ -51,7 +56,7 @@ def parse_arguments():
         choices=SYSTEM_MODES,
         default=DEFAULT_SYSTEM_MODE,
         help=(
-            "Chế độ tác tử: planner-coder, planner-coder-tester-reviewer, "
+            "Chế độ tác tử: coder, planner-coder, planner-coder-tester-reviewer "
             "hoặc planner-coder-tester-reviewer-tools "
             f"(mặc định: {DEFAULT_SYSTEM_MODE})"
         )

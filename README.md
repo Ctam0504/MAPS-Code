@@ -99,14 +99,16 @@ Bash
 python run_mas.py
 
 2. Select an agent mode
-The default mode enables all four agents, including the Reviewer's workspace tools and language-specific skills.
+The default mode enables all four agents without Reviewer tools or language-specific skills.
 
 ```bash
+python run_mas.py --mode coder
 python run_mas.py --mode planner-coder
 python run_mas.py --mode planner-coder-tester-reviewer
 python run_mas.py --mode planner-coder-tester-reviewer-tools
 ```
 
+- `coder`: Coder only; it chooses the target language from the task, and the coordinator detects it from the generated file extensions for the sandbox.
 - `planner-coder`: Planner and Coder only; testing and review are disabled.
 - `planner-coder-tester-reviewer`: Adds Tester and Reviewer without Reviewer tools or language-specific skills; Reviewer uses the shared guidance in `multi_agent_system/reviewer_skills/common.md`.
 - `planner-coder-tester-reviewer-tools`: Enables the full pipeline, including Reviewer tools and language skills.

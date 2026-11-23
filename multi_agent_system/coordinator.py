@@ -29,6 +29,7 @@ from multi_agent_system.agents import (
 )
 from multi_agent_system.sandbox import MultiFileSandboxEngine
 from multi_agent_system.memory import SharedMemory
+from multi_agent_system.tools.language_detector import EXTENSION_MAP
 import multi_agent_system.config as config
 
 class MultiAgentCoordinator:
@@ -67,6 +68,7 @@ class MultiAgentCoordinator:
 
         # Trạng thái điều phối
         self.current_plan: Optional[MultiFilePlan] = None
+        self.target_language: Optional[str] = None
         self.input_folder: Optional[str] = None
         self.initial_files: Dict[str, str] = {}
         self.initial_generated_files: List[str] = []
@@ -106,6 +108,20 @@ class MultiAgentCoordinator:
             files=files,
             rationale="Planner disabled by benchmark variant; coordinator supplied the minimal contract.",
         )
+
+    @staticmethod
+    def _infer_language_from_generated_files(files: Dict[str, str]) -> str:
+        languages = {
+            EXTENSION_MAP[os.path.splitext(filepath)[1].lower()].value
+            for filepath in files
+            if os.path.splitext(filepath)[1].lower() in EXTENSION_MAP
+        }
+        if len(languages) != 1:
+            raise ValueError(
+                "Không thể xác định duy nhất ngôn ngữ cho Sandbox từ các tệp Coder sinh ra: "
+                f"{list(files)}."
+            )
+        return languages.pop()
 
     def _load_input_folder(self, input_folder: str) -> Dict[str, str]:
         """
@@ -156,7 +172,7 @@ class MultiAgentCoordinator:
         lang = (
             self.current_plan.target_language.lower()
             if self.current_plan and self.current_plan.target_language
-            else config.DEFAULT_TARGET_LANGUAGE
+            else (self.target_language or config.DEFAULT_TARGET_LANGUAGE)
         )
         test_filename = "TestHarness.java" if lang == "java" else (
             f"test_harness.{'py' if lang == 'python' else 'c'}"
@@ -178,6 +194,8 @@ class MultiAgentCoordinator:
         planner_mem_str = "BẬT" if self.enable_shared_memory else "TẮT"
         if "planner" in self.enabled_agents:
             step1_status = f"Khởi chạy Planner Agent (Shared Memory: **{planner_mem_str}**)..."
+        elif self.enabled_agents == {"coder"}:
+            step1_status = "Chuyển trực tiếp yêu cầu cho Coder; không tạo kế hoạch."
         else:
             step1_status = "Planner Agent bị tắt theo Variant; dùng fallback plan do Coordinator khởi tạo."
 
@@ -399,7 +417,23 @@ class MultiAgentCoordinator:
         # BƯỚC 1: PLANNER LẬP KẾ HOẠCH KIẾN TRÚC BAN ĐẦU
         # ----------------------------------------------------------------------
         self.memory.set_task_goal(task_prompt)
-        if "planner" in self.enabled_agents:
+        coder_only_mode = self.enabled_agents == {"coder"}
+        if coder_only_mode:
+            self.current_plan = None
+            print("\n💻 [BƯỚC 1] Chuyển trực tiếp đề bài cho Coder; Coder tự chọn ngôn ngữ, không lập kế hoạch...")
+            generated_files = self.coder.generate_from_task(
+                task_goal=task_prompt,
+                target_language="",
+                initial_files=self.initial_files,
+            )
+            lang = self._infer_language_from_generated_files(generated_files)
+            self.target_language = lang
+            print(f"   -> Ngôn ngữ do Coder chọn (nhận diện từ phần mở rộng tệp): {lang.upper()}")
+            self.current_files = dict(self.initial_files)
+            self.current_files.update(generated_files)
+            self.initial_generated_files = list(generated_files.keys())
+            self.memory.update_files(self.current_files)
+        elif "planner" in self.enabled_agents:
             print(f"\n📐 [BƯỚC 1] Khởi chạy Planner Agent (Shared Memory: {'BẬT' if self.enable_shared_memory else 'TẮT'})...")
             self.current_plan = await self.planner.plan_codebase(
                 task_prompt=task_prompt,
@@ -409,33 +443,36 @@ class MultiAgentCoordinator:
         else:
             print("\n📐 [BƯỚC 1] Planner Agent bị tắt theo Variant; dùng fallback plan...")
             self.current_plan = self._build_fallback_plan(task_prompt, target_language)
-        self.memory.update_plan(self.current_plan)
-        lang = self.current_plan.target_language
-        print(f"   -> Ngôn ngữ đích xác định: {lang.upper()}")
-        print(f"   -> Mẫu kiến trúc: {self.current_plan.architecture_pattern}")
-        print(f"   -> Thứ tự sinh file Topo: {self.current_plan.execution_order}")
-        print("   -> Chi tiết FileSpec:")
-        for file_spec in self.current_plan.files:
-            print(f"      [FileSpec] {file_spec.filepath}")
-            print(f"         action: {file_spec.action}")
-            print(f"         dependencies: {file_spec.dependencies}")
-            print(f"         external_dependencies: {file_spec.external_dependencies}")
-            print(f"         purpose: {file_spec.purpose}")
-            print(f"         interface_summary: {file_spec.interface_summary}")
+        if not coder_only_mode:
+            self.memory.update_plan(self.current_plan)
+            lang = self.current_plan.target_language
+            self.target_language = lang
+            print(f"   -> Ngôn ngữ đích xác định: {lang.upper()}")
+            print(f"   -> Mẫu kiến trúc: {self.current_plan.architecture_pattern}")
+            print(f"   -> Thứ tự sinh file Topo: {self.current_plan.execution_order}")
+            print("   -> Chi tiết FileSpec:")
+            for file_spec in self.current_plan.files:
+                print(f"      [FileSpec] {file_spec.filepath}")
+                print(f"         action: {file_spec.action}")
+                print(f"         dependencies: {file_spec.dependencies}")
+                print(f"         external_dependencies: {file_spec.external_dependencies}")
+                print(f"         purpose: {file_spec.purpose}")
+                print(f"         interface_summary: {file_spec.interface_summary}")
 
         # ----------------------------------------------------------------------
         # BƯỚC 2: CODER SINH MÃ NGUỒN CÁC TỆP ĐẦU TIÊN
         # ----------------------------------------------------------------------
-        print(f"\n💻 [BƯỚC 2] Khởi chạy Coder Agent sinh mã nguồn ({lang.upper()})...")
-        self.current_files = self.coder.generate_all_files(
-            plan=self.current_plan,
-            task_goal=task_prompt,
-            initial_files=self.initial_files,
-            output_dir=self.output_dir,
-            shared_memory=self.memory
-        )
-        self.initial_generated_files = list(self.current_files.keys())
-        self.memory.update_files(self.current_files)
+        if not coder_only_mode:
+            print(f"\n💻 [BƯỚC 2] Khởi chạy Coder Agent sinh mã nguồn ({lang.upper()})...")
+            self.current_files = self.coder.generate_all_files(
+                plan=self.current_plan,
+                task_goal=task_prompt,
+                initial_files=self.initial_files,
+                output_dir=self.output_dir,
+                shared_memory=self.memory
+            )
+            self.initial_generated_files = list(self.current_files.keys())
+            self.memory.update_files(self.current_files)
 
         # ----------------------------------------------------------------------
         # BƯỚC 3: TESTER SINH KỊCH BẢN KIỂM THỬ BAN ĐẦU
