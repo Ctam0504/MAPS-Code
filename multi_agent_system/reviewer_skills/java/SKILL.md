@@ -28,12 +28,8 @@
 - Tuân thủ Cây quyết định phân định trách nhiệm để chọn đúng 1 Target (CODER, PLANNER hoặc TESTER).
 - Hướng dẫn sửa đổi (instructions) phải là thay đổi tối thiểu, cụ thể, bảo tồn các interface và hợp đồng kiến trúc đã có.
 ### NGUYÊN TẮC XỬ LÝ LỖI TẠI TỆP KIỂM THỬ (TEST HARNESS):
-- Nếu log lỗi chỉ ra lỗi cú pháp, cấu trúc câu lệnh, hoặc import/include sai trực tiếp tại tệp kiểm thử:
-  -> **100% LÀ LỖI CỦA TESTER (TESTCASE)**.
-  -> NGHIÊM CẤM gán cho PLANNER hay CODER!
-- Khi tệp kiểm thử bị lỗi, **TUYỆT ĐỐI LOẠI TRỪ PLANNER**.
 - **Quy tắc phân định trách nhiệm**:
-  - **Lỗi tại tệp kiểm thử**:
+  - **Lỗi tại tệp kiểm thử (TestHarness.java)**:
     + Nếu tệp kiểm thử tự bị lỗi cú pháp hoặc import sai hoặc thiếu -> Phán quyết: **TESTER (TESTCASE)**.
     + Nếu tệp kiểm thử gọi hàm/kiểu dữ liệu có trong đặc tả bài toán nhưng mã nguồn chưa có -> Phán quyết: **CODER (LOCAL)**.
     + Nếu tệp kiểm thử gọi hàm/kiểu dữ liệu tự bịa không có trong đặc tả bài toán -> Phán quyết: **TESTER (TESTCASE)**.
@@ -42,7 +38,7 @@
     + 100% thuộc về CODER hoặc PLANNER, nghiêm cấm đổ lỗi cho TESTER.
     + Nếu Plan đã có đề cập mà mã nguồn viết thiếu hoặc sai cú pháp -> Phán quyết: **CODER (LOCAL)**.
     + Chỉ khi Plan thiếu hẳn thành phần mà bài toán yêu cầu -> Phán quyết: **PLANNER (GLOBAL)**.
-  - **Lỗi runtime assert thất bại**:
+  - **Lỗi runtime assert thất bại (TestHarness.java)**:
     + mã nguồn xử lý sai yêu cầu bài toán --> Phán quyết: **CODER (LOCAL)** 
     + Testharness đưa ra các assert hoặc testcase vô lý so với yêu cầu bài toán --> phán quyết:  **TESTER (TESTCASE)**
 ### VERDICT CHO CHECKED EXCEPTION:

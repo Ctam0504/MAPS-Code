@@ -23,9 +23,38 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 from multi_agent_system.coordinator import MultiAgentCoordinator
 from multi_agent_system import config
 
+DEFAULT_SYSTEM_MODE = "planner-coder-tester-reviewer"
+SYSTEM_MODES = {
+    "planner-coder": {
+        "enabled_agents": ["planner", "coder"],
+        "reviewer_tools": False,
+        "reviewer_skills": False,
+    },
+    "planner-coder-tester-reviewer": {
+        "enabled_agents": ["planner", "coder", "tester", "reviewer"],
+        "reviewer_tools": False,
+        "reviewer_skills": False,
+    },
+    "planner-coder-tester-reviewer-tools": {
+        "enabled_agents": ["planner", "coder", "tester", "reviewer"],
+        "reviewer_tools": True,
+        "reviewer_skills": True,
+    },
+}
+
 def parse_arguments():
     parser = argparse.ArgumentParser(
         description="Hệ thống Multi-Agent Code Generation Đa Tệp (Python, Java, C) với GraphRAG và Reviewer Audit"
+    )
+    parser.add_argument(
+        "--mode",
+        choices=SYSTEM_MODES,
+        default=DEFAULT_SYSTEM_MODE,
+        help=(
+            "Chế độ tác tử: planner-coder, planner-coder-tester-reviewer, "
+            "hoặc planner-coder-tester-reviewer-tools "
+            f"(mặc định: {DEFAULT_SYSTEM_MODE})"
+        )
     )
     parser.add_argument(
         "--task", "-t",
@@ -98,11 +127,15 @@ async def main_async():
 
     # Đặt thư mục output bằng thư mục input nếu đã chỉ định (sửa trực tiếp trong cùng folder)
     output_dir = args.output_dir if args.output_dir else (input_folder if input_folder else config.DEFAULT_OUTPUT_DIR)
+    mode_config = SYSTEM_MODES[args.mode]
     coordinator = MultiAgentCoordinator(
         output_dir=output_dir,
         max_cycles=args.cycles,
         use_docker=args.docker,
-        enable_shared_memory=args.share_mem
+        enable_shared_memory=args.share_mem,
+        enabled_agents=mode_config["enabled_agents"],
+        enable_reviewer_tools=mode_config["reviewer_tools"],
+        enable_reviewer_skills=mode_config["reviewer_skills"],
     )
 
     await coordinator.run(

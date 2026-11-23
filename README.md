@@ -97,3 +97,16 @@ To execute the multi-agent system from the command line:
 
 Bash
 python run_mas.py
+
+2. Select an agent mode
+The default mode enables all four agents, including the Reviewer's workspace tools and language-specific skills.
+
+```bash
+python run_mas.py --mode planner-coder
+python run_mas.py --mode planner-coder-tester-reviewer
+python run_mas.py --mode planner-coder-tester-reviewer-tools
+```
+
+- `planner-coder`: Planner and Coder only; testing and review are disabled.
+- `planner-coder-tester-reviewer`: Adds Tester and Reviewer without Reviewer tools or language-specific skills; Reviewer uses the shared guidance in `multi_agent_system/reviewer_skills/common.md`.
+- `planner-coder-tester-reviewer-tools`: Enables the full pipeline, including Reviewer tools and language skills.

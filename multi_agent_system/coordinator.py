@@ -38,7 +38,9 @@ class MultiAgentCoordinator:
         max_cycles: Optional[int] = None,
         use_docker: Optional[bool] = None,
         enable_shared_memory: Optional[bool] = None,
-        enabled_agents: Optional[List[str]] = None
+        enabled_agents: Optional[List[str]] = None,
+        enable_reviewer_tools: bool = True,
+        enable_reviewer_skills: bool = True
     ):
         self.output_dir = os.path.abspath(output_dir or config.DEFAULT_OUTPUT_DIR)
         self.max_cycles = max_cycles if max_cycles is not None else config.MAX_SELF_CORRECTION_CYCLES
@@ -54,7 +56,10 @@ class MultiAgentCoordinator:
         self.planner = PlannerAgent()
         self.coder = CoderAgent()
         self.tester = TesterAgent()
-        self.reviewer = ReviewerAgent()
+        self.reviewer = ReviewerAgent(
+            enable_tools=enable_reviewer_tools,
+            enable_skills=enable_reviewer_skills,
+        )
         self.sandbox = MultiFileSandboxEngine(use_docker=self.use_docker)
 
         # Shared Memory giữa các Agent

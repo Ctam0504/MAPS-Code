@@ -26,7 +26,9 @@ class ReviewerAgent(BaseAgent):
         self,
         model_name: Optional[str] = None,
         base_url: Optional[str] = None,
-        max_tool_iterations: int = 6
+        max_tool_iterations: int = 6,
+        enable_tools: bool = True,
+        enable_skills: bool = True
     ):
         # 1. Gọi super().__init__ trước để khởi tạo self.base_url, self.model_name,...
         super().__init__(
@@ -37,6 +39,8 @@ class ReviewerAgent(BaseAgent):
         
         # 2. Bây giờ self.base_url đã tồn tại và đã được chuẩn hóa rstrip("/")
         self.max_tool_iterations = max_tool_iterations
+        self.enable_tools = enable_tools
+        self.enable_skills = enable_skills
         self.timeout = config.LLM_TIMEOUT
         
         api_base_url = self.base_url
@@ -264,7 +268,7 @@ class ReviewerAgent(BaseAgent):
         return str(args)
 
     @staticmethod
-    def _load_review_skill(target_language: str) -> Tuple[str, str, str, str]:
+    def _load_review_skill(target_language: str) -> Tuple[str, str, str]:
         language = LanguageType.from_str(target_language).value
         skills_dir = Path(__file__).resolve().parents[1] / "reviewer_skills"
         language_path = skills_dir / language / "SKILL.md"
@@ -300,6 +304,14 @@ class ReviewerAgent(BaseAgent):
             verdict_match.group(1).strip()
         )
 
+    @staticmethod
+    def _load_common_review_guidelines() -> str:
+        guidelines_path = Path(__file__).resolve().parents[1] / "reviewer_skills" / "common.md"
+        try:
+            return guidelines_path.read_text(encoding="utf-8").strip()
+        except OSError as exc:
+            raise RuntimeError(f"Không thể nạp Reviewer hướng dẫn dùng chung: {exc}") from exc
+
     def review(
         self,
         task_goal: str,
@@ -309,24 +321,34 @@ class ReviewerAgent(BaseAgent):
         error_msg: str,
         workspace_dir: str
     ) -> ReviewDecision:
-        language, investigation_skill, verdict_skill = self._load_review_skill(
-            plan.target_language
-        )
+        language = LanguageType.from_str(plan.target_language).value
+        investigation_skill = ""
+        verdict_skill = ""
+        common_guidelines = ""
+        if self.enable_skills:
+            language, investigation_skill, verdict_skill = self._load_review_skill(
+                plan.target_language
+            )
+        else:
+            common_guidelines = self._load_common_review_guidelines()
         # Layer 1: Sanitize đường dẫn sandbox trước khi đưa vào prompt
         sanitized_error_msg = self._sanitize_sandbox_paths(error_msg)
         clean_error_msg = self._truncate_error_log(sanitized_error_msg, max_lines=50)
         
         # 1. Khởi tạo Tools (Bao gồm read_file và search_code)
-        selected_tool_names = ["search_code", "read_file"]
-        ws_tools = WorkspaceTools(
-            workspace_dir=workspace_dir,
-            selected_tools=selected_tool_names
-        )
-        tools_map = {tool.name: tool for tool in ws_tools.get_tools()}
-        openai_tools = WorkspaceTools.get_tool_definitions(
-            workspace_dir=workspace_dir,
-            selected_tools=selected_tool_names
-        )
+        tools_map: Dict[str, Any] = {}
+        openai_tools = []
+        if self.enable_tools:
+            selected_tool_names = ["search_code", "read_file"]
+            ws_tools = WorkspaceTools(
+                workspace_dir=workspace_dir,
+                selected_tools=selected_tool_names
+            )
+            tools_map = {tool.name: tool for tool in ws_tools.get_tools()}
+            openai_tools = WorkspaceTools.get_tool_definitions(
+                workspace_dir=workspace_dir,
+                selected_tools=selected_tool_names
+            )
         investigate_prompt = f"""Bạn là Kỹ thuật viên Giám định Hiện trường Mã nguồn (Forensic Code Investigator).
 Nhiệm vụ DUY NHẤT: Thu thập BẰNG CHỨNG MÃ NGUỒN THỰC TẾ (FACTS) tại các vị trí xảy ra lỗi để chuyển giao cho Thẩm phán (Verdict).
 TUYỆT ĐỐI KHÔNG ĐƯA RA NHẬN ĐỊNH CHỦ QUAN.
@@ -362,7 +384,7 @@ TUYỆT ĐỐI KHÔNG ĐƯA RA NHẬN ĐỊNH CHỦ QUAN.
         # Theo dõi tập hợp các tool call đã thực thi trong toàn bộ phiên hội thoại để chống gọi lặp lại
         executed_tool_calls: Set[Tuple[str, str]] = set()
 
-        for iteration in range(self.max_tool_iterations):
+        for iteration in range(self.max_tool_iterations if self.enable_tools else 0):
             try:
                 response = self.client.chat.completions.create(
                     model=self.model_name,
@@ -537,8 +559,15 @@ TUYỆT ĐỐI KHÔNG ĐƯA RA NHẬN ĐỊNH CHỦ QUAN.
                 + "\n---\n".join(investigation_notes)
             )
         else:
-            print("⚠️ [Reviewer] Pha 1 không thu thập được tool note. Fallback nạp toàn bộ code_overview.")
+            if self.enable_tools:
+                print("⚠️ [Reviewer] Pha 1 không thu thập được tool note. Fallback nạp toàn bộ code_overview.")
+            else:
+                print("ℹ️ [Reviewer] Tools bị tắt; dùng toàn bộ mã nguồn trong prompt để thẩm định.")
             gathered_context = code_overview
+        review_rules = (
+            f"### QUY TẮC CHO {language.upper()}:\n{verdict_skill}"
+            if self.enable_skills else f"### HƯỚNG DẪN REVIEWER DÙNG CHUNG:\n{common_guidelines}"
+        )
         verdict_prompt = f"""BẠN LÀ THẨM PHÁN TỐI CAO (CODE AUDITOR).
 Dưới đây là kết quả điều tra từ mã nguồn. Hãy đối chiếu khách quan với Yêu cầu bài toán gốc và Plan để đưa ra phán quyết cuối cùng:
 
@@ -560,8 +589,7 @@ CHÚ Ý: CÁC TỆP PLANNER vÀ CODER TẠO RA VÀ ĐANG TỒN TẠI TRONG DỰ
 
 {gathered_context}
 
-### QUY TẮC CHO {language.upper()}:
-{verdict_skill}
+{review_rules}
 </context>
 <output_format>
 {{

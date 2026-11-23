@@ -41,4 +41,4 @@
     + mã nguồn xử lý sai yêu cầu bài toán --> Phán quyết: **CODER (LOCAL)** 
     + Testharness đưa ra các assert hoặc testcase vô lý so với yêu cầu bài toán --> phán quyết:  **TESTER (TESTCASE)**
 ### VERDICT CHECKED UNDECLARED SYMBOL:
-- Ngôn ngữ C có cấu trúc .c là nơi định nghĩa hàm, biến, struct, typedef; .h là nơi khai báo các symbol đó. Nếu một hàm bị undeclared, kiểm tra xem tệp .c chứa định nghĩa có include đúng .h chưa, và tệp .h được include đó có khai báo các symbol đó chưa.
+- Ngôn ngữ C có cấu trúc .c là nơi định nghĩa hàm, biến, struct, typedef; .h là nơi khai báo các symbol đó. Khi include thì tệp .h luôn là nơi được gọi.
