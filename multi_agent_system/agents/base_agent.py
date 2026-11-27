@@ -2,14 +2,14 @@
 multi_agent_system.agents.base_agent
 ====================================
 Lớp Agent cơ sở (BaseAgent) cho toàn bộ hệ thống.
-Quản lý giao tiếp LLM (Ollama), làm sạch phản hồi, và trích xuất mã nguồn/JSON.
+Quản lý giao tiếp LLM (OpenAI/Ollama), làm sạch phản hồi, và trích xuất mã nguồn/JSON.
 """
 
-import os
 import re
 import json
 import requests
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional
+from openai import OpenAI
 from .. import config
 
 class BaseAgent:
@@ -22,12 +22,32 @@ class BaseAgent:
         num_predict: int = 4096,
         timeout: int = 300
     ):
+        self.provider = config.LLM_PROVIDER
         self.model_name = model_name
         self.base_url = (base_url or config.OLLAMA_BASE_URL).rstrip("/")
         self.temperature = temperature
         self.num_ctx = num_ctx
         self.num_predict = num_predict
         self.timeout = timeout
+
+        if self.provider == "openai":
+            if not config.OPENAI_API_KEY:
+                raise ValueError(
+                    "LLM_PROVIDER=openai yêu cầu OPENAI_API_KEY trong file .env."
+                )
+            api_base_url = config.OPENAI_API_BASE
+            api_key = config.OPENAI_API_KEY
+        else:
+            api_base_url = self.base_url
+            api_key = "ollama"
+
+        if not api_base_url.endswith("/v1"):
+            api_base_url = f"{api_base_url}/v1"
+        self.client = OpenAI(
+            base_url=api_base_url,
+            api_key=api_key,
+            timeout=self.timeout
+        )
 
     def call_llm(
         self, 
@@ -36,8 +56,32 @@ class BaseAgent:
         format_json: bool = False
     ) -> str:
         """
-        Gọi Ollama generate API với xử lý stream hoặc non-stream an toàn.
+        Gọi LLM theo provider được chọn trong cấu hình môi trường.
         """
+        if self.provider == "openai":
+            messages = []
+            if system_prompt:
+                messages.append({"role": "system", "content": system_prompt})
+            messages.append({"role": "user", "content": prompt})
+            payload: Dict[str, Any] = {
+                "model": self.model_name,
+                "messages": messages,
+                "temperature": self.temperature,
+                "max_tokens": self.num_predict
+            }
+            if format_json:
+                payload["response_format"] = {"type": "json_object"}
+
+            try:
+                response = self.client.chat.completions.create(**payload)
+                return response.choices[0].message.content or ""
+            except Exception as e:
+                print(
+                    f"❌ [BaseAgent: {self.model_name}] "
+                    f"Lỗi khi gọi OpenAI API: {e}"
+                )
+                return ""
+
         url = f"{self.base_url}/api/generate"
         payload: Dict[str, Any] = {
             "model": self.model_name,

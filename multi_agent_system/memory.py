@@ -1,5 +1,6 @@
 from typing import Dict, Optional, Any, List
-from multi_agent_system.schemas import MultiFilePlan, FileSpec
+from multi_agent_system.schemas.multi_file_plan import MultiFilePlan
+from multi_agent_system.schemas.file_spec import FileSpec
 
 
 class SharedMemory:

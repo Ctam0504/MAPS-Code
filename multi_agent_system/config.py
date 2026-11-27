@@ -11,18 +11,39 @@ Tập trung toàn bộ các tham số cấu hình hệ thống Multi-Agent Code 
 
 import os
 from typing import List, Dict, Any
+from dotenv import load_dotenv
 
 # ==============================================================================
 # 1. CẤU HÌNH KẾT NỐI OLLAMA / LLM
 # ==============================================================================
+load_dotenv(os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env"))
+
+LLM_PROVIDER: str = os.environ.get("LLM_PROVIDER", "ollama").strip().lower()
+if LLM_PROVIDER not in {"ollama", "openai"}:
+    raise ValueError("LLM_PROVIDER chỉ hỗ trợ 'ollama' hoặc 'openai'.")
+
 OLLAMA_BASE_URL: str = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
+OPENAI_API_KEY: str = os.environ.get("OPENAI_API_KEY", "").strip()
+OPENAI_API_BASE: str = (
+    os.environ.get("OPENAI_API_BASE", "").strip()
+    or "https://api.openai.com/v1"
+).rstrip("/")
+if not OPENAI_API_BASE.endswith("/v1"):
+    OPENAI_API_BASE = f"{OPENAI_API_BASE}/v1"
+OPENAI_MODEL: str = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
 
 # Model gán riêng cho từng Agent (có thể chỉnh độc lập tùy theo dung lượng VRAM/RAM)
-PLANNER_MODEL: str = os.environ.get("PLANNER_MODEL", "qwen2.5-coder:7b")
-CODER_MODEL: str = os.environ.get("CODER_MODEL", "qwen2.5-coder:7b")
-TESTER_MODEL: str = os.environ.get("TESTER_MODEL", "qwen2.5-coder:7b")
-REVIEWER_MODEL: str = os.environ.get("REVIEWER_MODEL", "qwen2.5-coder:7b")
-EMBEDDING_MODEL: str = os.environ.get("EMBEDDING_MODEL", "nomic-embed-text")
+DEFAULT_LLM_MODEL = (
+    OPENAI_MODEL if LLM_PROVIDER == "openai" else "qwen2.5-coder:7b"
+)
+PLANNER_MODEL: str = os.environ.get("PLANNER_MODEL", DEFAULT_LLM_MODEL)
+CODER_MODEL: str = os.environ.get("CODER_MODEL", DEFAULT_LLM_MODEL)
+TESTER_MODEL: str = os.environ.get("TESTER_MODEL", DEFAULT_LLM_MODEL)
+REVIEWER_MODEL: str = os.environ.get("REVIEWER_MODEL", DEFAULT_LLM_MODEL)
+EMBEDDING_MODEL: str = os.environ.get(
+    "EMBEDDING_MODEL",
+    "text-embedding-3-small" if LLM_PROVIDER == "openai" else "nomic-embed-text"
+)
 
 # Tham số sinh text của LLM
 LLM_TEMPERATURE: float = 0.1

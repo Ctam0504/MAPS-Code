@@ -91,6 +91,20 @@ install dependencies:
 Bash
 pip install -r requirements.txt
 
+### Chọn nhà cung cấp LLM
+
+Chỉnh `LLM_PROVIDER` trong file `.env`:
+
+```env
+LLM_PROVIDER=ollama
+```
+
+Đặt thành `openai` để dùng OpenAI API. Khi chọn OpenAI, cần cấu hình `OPENAI_API_KEY`;
+`OPENAI_API_BASE` mặc định là `https://api.openai.com/v1`. Có thể đặt `OPENAI_MODEL`
+(mặc định `gpt-4o-mini`) hoặc các biến `PLANNER_MODEL`, `CODER_MODEL`,
+`TESTER_MODEL`, `REVIEWER_MODEL` để chọn model riêng. Mặc định của chế độ local
+là Ollama tại `OLLAMA_BASE_URL` (`http://localhost:11434`).
+
 Usage
 1. Run via CLI
 To execute the multi-agent system from the command line:

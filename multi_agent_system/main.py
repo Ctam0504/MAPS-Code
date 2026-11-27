@@ -23,7 +23,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 from multi_agent_system.coordinator import MultiAgentCoordinator
 from multi_agent_system import config
 
-DEFAULT_SYSTEM_MODE = "coder"
+DEFAULT_SYSTEM_MODE = "planner-coder-tester-reviewer-tools"
 SYSTEM_MODES = {
     "coder": {
         "enabled_agents": ["coder"],

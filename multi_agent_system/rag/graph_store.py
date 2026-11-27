@@ -10,6 +10,7 @@ import networkx as nx
 import chromadb
 from typing import List, Dict, Any, Optional, Union
 import httpx
+from openai import AsyncOpenAI
 
 from .. import config
 from .ast_extractor import CodeChunk
@@ -24,6 +25,11 @@ class GraphKnowledgeStore:
         self.chroma_dir = chroma_dir or config.CHROMA_DB_DIR
         self.graph_file = graph_file or config.GRAPH_FILE_PATH
         self.collection_name = config.COLLECTION_NAME
+        if config.LLM_PROVIDER == "openai":
+            embedding_model_id = config.EMBEDDING_MODEL.replace("/", "_")
+            self.collection_name = (
+                f"{self.collection_name}_openai_{embedding_model_id}"
+            )
         if codebase_path:
             canonical_path = os.path.normcase(os.path.realpath(codebase_path))
             path_hash = hashlib.sha256(canonical_path.encode("utf-8")).hexdigest()[:16]
@@ -45,10 +51,27 @@ class GraphKnowledgeStore:
                 print(f"⚠️ [GraphKnowledgeStore] Lỗi khởi tạo ChromaDB collection: {e}")
 
     async def get_embeddings(self, texts: List[str]) -> List[List[float]]:
-        """Lấy vector embedding từ Ollama, fallback zero vector nếu lỗi."""
+        """Lấy vector embedding từ provider hiện được chọn."""
         if not texts:
             return []
-        
+
+        if config.LLM_PROVIDER == "openai":
+            try:
+                async with AsyncOpenAI(
+                    api_key=config.OPENAI_API_KEY,
+                    base_url=config.OPENAI_API_BASE,
+                    timeout=60.0
+                ) as client:
+                    response = await client.embeddings.create(
+                        model=config.EMBEDDING_MODEL,
+                        input=texts
+                    )
+                return [item.embedding for item in response.data]
+            except Exception as e:
+                raise RuntimeError(
+                    f"Không thể lấy embeddings từ OpenAI: {e}"
+                ) from e
+
         url = f"{config.OLLAMA_BASE_URL.rstrip('/')}/api/embed"
         payload = {
             "model": config.EMBEDDING_MODEL,

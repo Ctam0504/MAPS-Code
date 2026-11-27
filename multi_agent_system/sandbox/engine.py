@@ -14,7 +14,9 @@ import shutil
 import subprocess
 from typing import Optional
 
-from ..schemas import ExecutionRequest, ExecutionResult, ExecutionStatus
+from ..schemas.execution_request import ExecutionRequest
+from ..schemas.execution_result import ExecutionResult
+from ..schemas.execution_status import ExecutionStatus
 from .drivers import MultiFileDriverFactory
 from .. import config
 

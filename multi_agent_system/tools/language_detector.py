@@ -8,7 +8,7 @@ Kết hợp giữa thư viện Magika và cơ chế phân tích đuôi tệp tin
 import os
 from pathlib import Path
 from typing import List, Dict, Tuple, Optional
-from ..schemas import LanguageType
+from ..schemas.language_type import LanguageType
 
 # Cố gắng nạp thư viện Magika (AI-based file type detection)
 try:

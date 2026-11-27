@@ -13,7 +13,8 @@ from typing import Optional, Any, Dict, List
 from pydantic import ValidationError
 
 from .base_agent import BaseAgent
-from ..schemas import MultiFilePlan, FileSpec, LanguageType
+from ..schemas.multi_file_plan import MultiFilePlan
+from ..schemas.file_spec import FileSpec
 from ..tools.language_detector import detect_language_from_folder
 from ..rag.ast_extractor import parse_codebase_to_graph_and_chunks
 from ..rag.rag_pipeline import GraphRAGRetriever

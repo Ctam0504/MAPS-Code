@@ -9,7 +9,8 @@ và tiến hành sửa đổi mã nguồn khi có chỉ thị lỗi Local từ R
 from typing import Dict, Optional, List, Any
 import os
 from .base_agent import BaseAgent
-from ..schemas import FileSpec, MultiFilePlan
+from ..schemas.file_spec import FileSpec
+from ..schemas.multi_file_plan import MultiFilePlan
 from .. import config
 
 class CoderAgent(BaseAgent):

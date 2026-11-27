@@ -9,12 +9,14 @@ Thẩm định nguyên nhân cốt lõi và phân định chính xác:
 """
 import os
 from pyexpat.errors import messages
-from openai import OpenAI
 import json
 from typing import Dict, Optional, Any, List, Tuple, Set
 from pathlib import Path
 from .base_agent import BaseAgent
-from ..schemas import LanguageType, MultiFilePlan, ReviewDecision, ReviewTarget
+from ..schemas.language_type import LanguageType
+from ..schemas.multi_file_plan import MultiFilePlan
+from ..schemas.review_decision import ReviewDecision
+from ..schemas.review_target import ReviewTarget
 from .. import config
 import re
 from ..tools.workspace_tools import WorkspaceTools
@@ -34,7 +36,8 @@ class ReviewerAgent(BaseAgent):
         super().__init__(
             model_name=model_name or config.REVIEWER_MODEL,
             base_url=base_url,
-            temperature=0.1
+            temperature=0.1,
+            timeout=config.LLM_TIMEOUT
         )
         
         # 2. Bây giờ self.base_url đã tồn tại và đã được chuẩn hóa rstrip("/")
@@ -42,16 +45,6 @@ class ReviewerAgent(BaseAgent):
         self.enable_tools = enable_tools
         self.enable_skills = enable_skills
         self.timeout = config.LLM_TIMEOUT
-        
-        api_base_url = self.base_url
-        if not api_base_url.endswith("/v1"):
-            api_base_url = f"{api_base_url}/v1"
-            
-        self.client = OpenAI(
-            base_url=api_base_url,
-            api_key=os.environ.get("OLLAMA_API_KEY", "ollama"),
-            timeout=self.timeout
-        )
 
     @staticmethod
     def _sanitize_sandbox_paths(text: str) -> str:
